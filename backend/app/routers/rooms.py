@@ -2,6 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models.room import Room, RoomStatus
+from ..auth import get_current_user
+from ..models.user import User
 from pydantic import BaseModel
 from typing import Optional
 import random
@@ -24,13 +26,14 @@ def generate_invite_code():
     return "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
 
 @rooms_router.post("/create", response_model=RoomResponse, summary="Создать комнату")
-async def create_room(request: CreateRoomRequest, db: Session = Depends(get_db)):
+async def create_room(request: CreateRoomRequest, db: Session = Depends(get_db),
+                      current_user: User = Depends(get_current_user)):
     invite_code = generate_invite_code()
 
     while db.query(Room).filter(Room.invite_code == invite_code).first():
         invite_code = generate_invite_code()
 
-    room = Room(title=request.title, invite_code=invite_code, created_by=uuid.uuid4())
+    room = Room(title=request.title, invite_code=invite_code, created_by=current_user.id)
 
     db.add(room)
     db.commit()
