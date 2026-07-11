@@ -1,6 +1,6 @@
 from fastapi import WebSocket, WebSocketDisconnect, APIRouter, HTTPException, status
 from typing import Dict, List
-from ..auth import get_current_user_ws  # <-- добавили
+from ..auth import get_current_user_ws
 
 signal_router = APIRouter()
 rooms: Dict[str, List[WebSocket]] = {}
