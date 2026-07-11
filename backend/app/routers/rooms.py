@@ -3,12 +3,12 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models.room import Room, RoomStatus
 from ..auth import get_current_user
+from ..services.participant_service import ParticipantService
 from ..models.user import User
 from pydantic import BaseModel
 from typing import Optional
 import random
 import string
-import uuid
 
 rooms_router = APIRouter(prefix="/rooms", tags=["Rooms"])
 
@@ -54,7 +54,6 @@ async def get_room(invite_code: str, db: Session = Depends(get_db)):
     if not room:
         raise HTTPException(status_code=404, detail="Комната не найдена")
 
-    from ..services.participant_service import ParticipantService
     participants_data = ParticipantService.get_participants_with_users(db, room.id)
 
     participants_list = []
