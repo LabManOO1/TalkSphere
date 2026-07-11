@@ -21,6 +21,8 @@ class RoomResponse(BaseModel):
     title: str
     created_at: str
     status: Optional[str] = None
+    participants: list = []
+    participants_count: int = 0
 
 def generate_invite_code():
     return "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
@@ -49,14 +51,30 @@ async def create_room(request: CreateRoomRequest, db: Session = Depends(get_db),
 @rooms_router.get("/{invite_code}", response_model=RoomResponse, summary="Получить данные о комнате по invite-коду")
 async def get_room(invite_code: str, db: Session = Depends(get_db)):
     room = db.query(Room).filter(Room.invite_code == invite_code).first()
-
     if not room:
-        raise HTTPException(status_code=404, detail="Room not found")
+        raise HTTPException(status_code=404, detail="Комната не найдена")
+
+    from ..services.participant_service import ParticipantService
+    participants_data = ParticipantService.get_participants_with_users(db, room.id)
+
+    participants_list = []
+    for participant, user in participants_data:
+        participants_list.append({
+            "user_id": str(user.id),
+            "username": user.username,
+            "joined_at": participant.joined_at.isoformat() if participant.joined_at else None,
+            "is_muted": participant.is_muted,
+            "is_video_off": participant.is_video_off,
+            "is_screen_sharing": participant.is_screen_sharing,
+            "role": participant.role.value if participant.role else "speaker"
+        })
 
     return RoomResponse(
         room_id=str(room.id),
         invite_code=room.invite_code,
         title=room.title,
         created_at=room.created_at.isoformat() if room.created_at else "",
-        status=room.status.value if room.status else ""
+        status=room.status.value if room.status else "",
+        participants=participants_list,
+        participants_count=len(participants_list)
     )
