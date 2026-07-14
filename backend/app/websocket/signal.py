@@ -64,7 +64,7 @@ async def signal_endpoint(
     try:
         while True:
             data = await websocket.receive_text()
-            print(f"📩 Сообщение от {user.username} в комнате {invite_code}")
+            print(f"Сообщение от {user.username} в комнате {invite_code}")
 
             for client in rooms[invite_code]:
                 if client != websocket:
