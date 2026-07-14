@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models.room import Room, RoomStatus
+from ..models.participant import RoomParticipant
 from ..auth import get_current_user
 from ..services.participant_service import ParticipantService
 from ..models.user import User
@@ -124,4 +125,56 @@ async def delete_room(
         "message": f"Комната {invite_code} успешно завершена",
         "room_id": str(room.id),
         "status": room.status.value
+    }
+
+
+@rooms_router.post("/{invite_code}/leave", summary="Выход из комнаты")
+async def leave_room(
+        invite_code: str,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    room = db.query(Room).filter(Room.invite_code == invite_code).first()
+    if not room:
+        raise HTTPException(status_code=404, detail="Комната не найдена")
+
+    if room.status != RoomStatus.active:
+        raise HTTPException(status_code=400, detail="Комната не активна")
+
+    participant = db.query(RoomParticipant).filter(
+        RoomParticipant.room_id == room.id,
+        RoomParticipant.user_id == current_user.id,
+        RoomParticipant.left_at.is_(None)
+    ).first()
+
+    if not participant:
+        raise HTTPException(status_code=404, detail="Вы не находитесь в этой комнате")
+
+    ParticipantService.remove_participant(db, room.id, current_user.id)
+
+    if invite_code in ws_rooms:
+        ws_rooms[invite_code] = [
+            ws_info for ws_info in ws_rooms[invite_code]
+            if ws_info["user_id"] != current_user.id
+        ]
+
+        if not ws_rooms[invite_code]:
+            for ws_info in ws_rooms[invite_code]:
+                try:
+                    await ws_info["ws"].close(code=1000, reason="Комната опустела")
+                except Exception as e:
+                    print(f"Ошибка при закрытии соединения: {e}")
+
+            del ws_rooms[invite_code]
+            print(f"WebSocket-комната {invite_code} удалена из памяти")
+
+            room.status = RoomStatus.ended
+            room.ended_at = datetime.now(timezone.utc)
+            db.commit()
+            print(f"Комната {invite_code} завершена в БД (статус ended)")
+
+    return {
+        "message": f"Вы вышли из комнаты {invite_code}",
+        "room_id": str(room.id),
+        "room_status": room.status.value
     }
