@@ -5,7 +5,7 @@ from sqlalchemy import or_
 from pydantic import BaseModel, EmailStr
 from ..database import get_db
 from ..models.user import User
-from ..auth import get_password_hash, verify_password, create_access_token
+from ..auth import get_password_hash, verify_password, create_access_token, get_current_user
 
 auth_router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -48,5 +48,14 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = 
 
     access_token = create_access_token(data={"sub": str(user.id)})
     return TokenResponse(access_token=access_token, token_type="bearer")
+
+@auth_router.get("/me", summary="получить информацию о текущем авторизованном пользователе")
+async def get_current_user_info(current_user: User = Depends(get_current_user)):
+    return {
+        "id": str(current_user.id),
+        "username": current_user.username,
+        "email": current_user.email,
+        "created_at": current_user.created_at.isoformat() if current_user.created_at else None
+    }
 
 
