@@ -5,6 +5,7 @@ import Login from "./pages/Login/Login";
 import Register from "./pages/Register/Register";
 import Meetings from "./pages/Meetings/Meetings";
 import JoinMeeting from "./pages/JoinMeeting/JoinMeeting";
+import Conference from "./pages/Conference/Conference";
 
 function App() {
   return (
@@ -16,6 +17,7 @@ function App() {
           <Route path="/register" element={<Register />} />
           <Route path="/meetings" element={<Meetings />} />
           <Route path="/meetings/join" element={<JoinMeeting />} />
+          <Route path="/conference/:inviteCode" element={<Conference />} />
         </Routes>
       </AuthProvider>
     </BrowserRouter>
