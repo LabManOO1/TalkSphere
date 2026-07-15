@@ -244,3 +244,33 @@ async def update_participant_status(
             "is_screen_sharing": participant.is_screen_sharing
         }
     }
+
+@rooms_router.get("/", summary="Получить список всех активных комнат")
+async def get_rooms(
+        db: Session = Depends(get_db)
+):
+
+    rooms_list = db.query(Room).filter(Room.status == RoomStatus.active).all()
+
+    result = []
+    for room in rooms_list:
+        creator = db.query(User).filter(User.id == room.created_by).first()
+        creator_name = creator.username if creator else "Неизвестный"
+
+        participants = ParticipantService.get_participants(db, room.id)
+        participants_count = len(participants)
+
+        result.append({
+            "room_id": str(room.id),
+            "invite_code": room.invite_code,
+            "title": room.title,
+            "created_by": creator_name,
+            "created_at": room.created_at.isoformat() if room.created_at else None,
+            "participants_count": participants_count,
+            "status": room.status.value
+        })
+
+    return {
+        "total": len(result),
+        "rooms": result
+    }
