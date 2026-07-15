@@ -22,11 +22,15 @@
 .brand {
   justify-self: start;
   border: 0;
-  background: transparent;
-  color: $white-color;
+  background: radial-gradient(circle, $black-color 0%, $primary-color 100%);
+  background-clip: text;
+  color: transparent;
+  font-family: "Manrope", sans-serif;
   font-size: 25px;
   font-weight: 800;
   letter-spacing: -0.7px;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .roomInfo {
@@ -92,13 +96,39 @@
   width: 100%;
   height: 100%;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  grid-auto-rows: minmax(0, 1fr);
   gap: 14px;
 }
 
 .singleVideo {
   grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  place-items: center;
+}
+
+.twoVideos {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.threeVideos {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.fourVideos {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+
+.sixVideos {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-auto-rows: minmax(0, 1fr);
+}
+
+.manyVideos {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-auto-rows: minmax(190px, 1fr);
+  overflow-y: auto;
 }
 
 .videoTile {
@@ -117,8 +147,16 @@
     width: 100%;
     height: 100%;
     display: block;
+    background: #111;
     object-fit: cover;
   }
+}
+
+.singleVideo .videoTile {
+  width: min(100%, 1120px);
+  height: auto;
+  max-height: 100%;
+  aspect-ratio: 16 / 9;
 }
 
 .mirroredVideo {
@@ -151,29 +189,36 @@
   bottom: 12px;
   left: 12px;
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
   gap: 10px;
+}
 
-  span {
-    max-width: calc(100% - 38px);
-    padding: 7px 11px;
-    overflow: hidden;
-    border-radius: 10px;
-    background: rgba(0, 0, 0, 0.58);
-    font-size: 13px;
-    font-weight: 700;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    backdrop-filter: blur(8px);
-  }
+.participantName {
+  max-width: calc(100% - 82px);
+  padding: 7px 11px;
+  overflow: hidden;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.58);
+  font-size: 13px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  backdrop-filter: blur(8px);
+}
+
+.mediaBadges {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 
   svg {
     width: 31px;
     height: 31px;
     padding: 7px;
     border-radius: 50%;
-    background: rgba(164, 0, 0, 0.85);
+    background: rgba(164, 0, 0, 0.88);
+    color: #fff;
     fill: none;
     stroke: currentColor;
     stroke-width: 2.2;
@@ -411,12 +456,6 @@
   to { transform: rotate(360deg); }
 }
 
-@media (min-width: 1180px) {
-  .videoGrid:not(.singleVideo) {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-
 @media (max-width: 760px) {
   .page {
     grid-template-rows: 64px minmax(0, 1fr) 92px;
@@ -454,12 +493,30 @@
   }
 
   .videoGrid,
-  .videoGrid:not(.singleVideo) {
+  .twoVideos,
+  .threeVideos,
+  .fourVideos,
+  .sixVideos,
+  .manyVideos {
     height: auto;
     min-height: 100%;
     grid-template-columns: 1fr;
-    grid-auto-rows: minmax(240px, 50vh);
+    grid-template-rows: none;
+    grid-auto-rows: minmax(230px, 48vh);
     gap: 10px;
+    overflow-y: visible;
+  }
+
+  .singleVideo {
+    height: 100%;
+    min-height: 0;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .singleVideo .videoTile {
+    max-height: none;
+    aspect-ratio: auto;
   }
 
   .videoTile {

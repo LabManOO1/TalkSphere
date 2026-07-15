@@ -25,6 +25,10 @@ const getErrorMessage = (error, fallback) => {
   return fallback;
 };
 
+
+const isRoomActive = (room) =>
+  String(room?.status || "active").toLowerCase() === "active";
+
 const extractInviteCode = (value) => {
   const trimmedValue = value.trim();
   if (!trimmedValue) return "";
@@ -100,6 +104,12 @@ function JoinMeeting() {
       );
 
       const room = response.data;
+
+      if (!isRoomActive(room)) {
+        setError("Эта конференция уже завершена");
+        return;
+      }
+
       const conferencePath = `/conference/${encodeURIComponent(inviteCode)}`;
       sessionStorage.setItem("selected_room", JSON.stringify(room));
 
