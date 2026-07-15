@@ -1,25 +1,26 @@
-import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { useAuth } from '../../context/AuthContext';
-import styles from './Login.module.scss';
+import { useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useAuth } from "../../context/AuthContext";
+import styles from "./Login.module.scss";
 
 function Login() {
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
   const { login } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-    setError('');
+    setError("");
 
     const normalizedUsername = username.trim();
 
     if (!normalizedUsername || !password) {
-      setError('Введите имя пользователя и пароль');
+      setError("Введите имя пользователя и пароль");
       return;
     }
 
@@ -29,7 +30,13 @@ function Login() {
       const result = await login(normalizedUsername, password);
 
       if (result.success) {
-        navigate('/', { replace: true });
+        const redirectTo =
+          location.state?.from ||
+          sessionStorage.getItem("redirect_after_login") ||
+          "/";
+
+        sessionStorage.removeItem("redirect_after_login");
+        navigate(redirectTo, { replace: true });
         return;
       }
 
@@ -105,7 +112,7 @@ function Login() {
               className={styles.button}
               disabled={isLoading}
             >
-              {isLoading ? 'ВХОД...' : 'ВОЙТИ'}
+              {isLoading ? "ВХОД..." : "ВОЙТИ"}
             </button>
           </form>
         </section>
