@@ -14,9 +14,22 @@ function Register() {
   const { register } = useAuth();
   const navigate = useNavigate();
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const handleSubmit = async (event) => {
+    event.preventDefault();
     setError('');
+
+    const normalizedUsername = username.trim();
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (!normalizedUsername) {
+      setError('Введите имя пользователя');
+      return;
+    }
+
+    if (!normalizedEmail) {
+      setError('Введите email');
+      return;
+    }
 
     if (password !== confirmPassword) {
       setError('Пароли не совпадают');
@@ -24,96 +37,134 @@ function Register() {
     }
 
     if (password.length < 6) {
-      setError('Пароль должен быть не менее 6 символов');
+      setError('Пароль должен содержать не менее 6 символов');
       return;
     }
 
     setIsLoading(true);
 
-    const result = await register(username, email, password);
+    try {
+      const result = await register(
+        normalizedUsername,
+        normalizedEmail,
+        password,
+      );
 
-    if (result.success) {
-      navigate('/');
-    } else {
+      if (result.success) {
+        navigate('/', { replace: true });
+        return;
+      }
+
       setError(result.error);
+    } finally {
+      setIsLoading(false);
     }
-
-    setIsLoading(false);
   };
 
   return (
     <div className={styles.page}>
-      <div className={styles.container}>
-        {/* Логотип сверху */}
-        <Link to="/" className={styles.logo}>
-          TalkSphere
-        </Link>
+      <Link to="/" className={styles.logo} aria-label="TalkSphere — на главную">
+        TalkSphere
+      </Link>
 
-        {/* Табы */}
-        <div className={styles.tabs}>
+      <main className={styles.auth}>
+        <nav className={styles.tabs} aria-label="Авторизация">
           <Link to="/login" className={styles.tab}>
             Вход
           </Link>
-          <Link to="/register" className={`${styles.tab} ${styles.active}`}>
+          <Link
+            to="/register"
+            className={`${styles.tab} ${styles.active}`}
+            aria-current="page"
+          >
             Регистрация
           </Link>
-        </div>
+        </nav>
 
-        {/* Заголовок */}
-        <h1 className={styles.title}>Добро пожаловать!</h1>
+        <section className={`${styles.card} ${styles.registerCard}`}>
+          <h1 className={styles.title}>Добро пожаловать!</h1>
 
-        {/* Форма */}
-        <form onSubmit={handleSubmit} className={styles.form}>
-          <div className={styles.field}>
-            <label className={styles.label}>Email или имя пользователя</label>
-            <input
-              type="text"
-              className={styles.input}
-              placeholder="Введите email или имя"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              required
-            />
-          </div>
+          <form onSubmit={handleSubmit} className={styles.form} noValidate>
+            <div className={styles.field}>
+              <label className={styles.label} htmlFor="register-username">
+                Имя пользователя
+              </label>
+              <input
+                id="register-username"
+                type="text"
+                className={styles.input}
+                value={username}
+                onChange={(event) => setUsername(event.target.value)}
+                autoComplete="username"
+                maxLength={100}
+                required
+              />
+            </div>
 
-          <div className={styles.field}>
-            <label className={styles.label}>Введите пароль</label>
-            <input
-              type="password"
-              className={styles.input}
-              placeholder="Введите пароль"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
-          </div>
+            <div className={styles.field}>
+              <label className={styles.label} htmlFor="register-email">
+                Email
+              </label>
+              <input
+                id="register-email"
+                type="email"
+                className={styles.input}
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                autoComplete="email"
+                maxLength={255}
+                required
+              />
+            </div>
 
-          <div className={styles.field}>
-            <label className={styles.label}>Повторите пароль</label>
-            <input
-              type="password"
-              className={styles.input}
-              placeholder="Повторите пароль"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              required
-            />
-          </div>
+            <div className={styles.field}>
+              <label className={styles.label} htmlFor="register-password">
+                Введите пароль
+              </label>
+              <input
+                id="register-password"
+                type="password"
+                className={styles.input}
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                autoComplete="new-password"
+                required
+              />
+            </div>
 
-          {error && <p className={styles.error}>{error}</p>}
+            <div className={styles.field}>
+              <label className={styles.label} htmlFor="register-password-repeat">
+                Повторите пароль
+              </label>
+              <input
+                id="register-password-repeat"
+                type="password"
+                className={styles.input}
+                value={confirmPassword}
+                onChange={(event) => setConfirmPassword(event.target.value)}
+                autoComplete="new-password"
+                required
+              />
+            </div>
 
-          <button
-            type="submit"
-            className={styles.button}
-            disabled={isLoading}
-          >
-            {isLoading ? 'Регистрация...' : 'ЗАРЕГИСТРИРОВАТЬСЯ'}
-          </button>
-        </form>
+            {error && (
+              <p className={styles.error} role="alert">
+                {error}
+              </p>
+            )}
 
-        {/* Копирайт */}
-        <p className={styles.copyright}>© TalkSphere</p>
-      </div>
+            <button
+              type="submit"
+              className={styles.button}
+              disabled={isLoading}
+            >
+              {isLoading ? 'РЕГИСТРАЦИЯ...' : 'ЗАРЕГИСТРИРОВАТЬСЯ'}
+            </button>
+          </form>
+        </section>
+      </main>
+
+      <p className={styles.copyright}>© TalkSphere</p>
     </div>
   );
 }

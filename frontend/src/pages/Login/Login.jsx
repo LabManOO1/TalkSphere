@@ -4,7 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import styles from './Login.module.scss';
 
 function Login() {
-  const [identifier, setIdentifier] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -12,83 +12,106 @@ function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const handleSubmit = async (event) => {
+    event.preventDefault();
     setError('');
-    setIsLoading(true);
 
-    const result = await login(identifier, password);
+    const normalizedUsername = username.trim();
 
-    if (result.success) {
-      navigate('/');
-    } else {
-      setError(result.error);
+    if (!normalizedUsername || !password) {
+      setError('Введите имя пользователя и пароль');
+      return;
     }
 
-    setIsLoading(false);
+    setIsLoading(true);
+
+    try {
+      const result = await login(normalizedUsername, password);
+
+      if (result.success) {
+        navigate('/', { replace: true });
+        return;
+      }
+
+      setError(result.error);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
     <div className={styles.page}>
-      <div className={styles.container}>
-        {/* Логотип сверху */}
-        <Link to="/" className={styles.logo}>
-          TalkSphere
-        </Link>
+      <Link to="/" className={styles.logo} aria-label="TalkSphere — на главную">
+        TalkSphere
+      </Link>
 
-        {/* Табы */}
-        <div className={styles.tabs}>
-          <Link to="/login" className={`${styles.tab} ${styles.active}`}>
+      <main className={styles.auth}>
+        <nav className={styles.tabs} aria-label="Авторизация">
+          <Link
+            to="/login"
+            className={`${styles.tab} ${styles.active}`}
+            aria-current="page"
+          >
             Вход
           </Link>
           <Link to="/register" className={styles.tab}>
             Регистрация
           </Link>
-        </div>
+        </nav>
 
-        {/* Заголовок */}
-        <h1 className={styles.title}>Добро пожаловать!</h1>
+        <section className={styles.card}>
+          <h1 className={styles.title}>Добро пожаловать!</h1>
 
-        {/* Форма */}
-        <form onSubmit={handleSubmit} className={styles.form}>
-          <div className={styles.field}>
-            <label className={styles.label}>Email или имя пользователя</label>
-            <input
-              type="text"
-              className={styles.input}
-              placeholder="Введите email или имя"
-              value={identifier}
-              onChange={(e) => setIdentifier(e.target.value)}
-              required
-            />
-          </div>
+          <form onSubmit={handleSubmit} className={styles.form} noValidate>
+            <div className={styles.field}>
+              <label className={styles.label} htmlFor="login-username">
+                Имя пользователя
+              </label>
+              <input
+                id="login-username"
+                type="text"
+                className={styles.input}
+                value={username}
+                onChange={(event) => setUsername(event.target.value)}
+                autoComplete="username"
+                maxLength={100}
+                required
+              />
+            </div>
 
-          <div className={styles.field}>
-            <label className={styles.label}>Введите пароль</label>
-            <input
-              type="password"
-              className={styles.input}
-              placeholder="Введите пароль"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
-          </div>
+            <div className={styles.field}>
+              <label className={styles.label} htmlFor="login-password">
+                Введите пароль
+              </label>
+              <input
+                id="login-password"
+                type="password"
+                className={styles.input}
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                autoComplete="current-password"
+                required
+              />
+            </div>
 
-          {error && <p className={styles.error}>{error}</p>}
+            {error && (
+              <p className={styles.error} role="alert">
+                {error}
+              </p>
+            )}
 
-          <button
-            type="submit"
-            className={styles.button}
-            disabled={isLoading}
-          >
-            {isLoading ? 'Вход...' : 'ВОЙТИ'}
-          </button>
-        </form>
+            <button
+              type="submit"
+              className={styles.button}
+              disabled={isLoading}
+            >
+              {isLoading ? 'ВХОД...' : 'ВОЙТИ'}
+            </button>
+          </form>
+        </section>
+      </main>
 
-        {/* Копирайт */}
-        <p className={styles.copyright}>© TalkSphere</p>
-      </div>
+      <p className={styles.copyright}>© TalkSphere</p>
     </div>
   );
 }
