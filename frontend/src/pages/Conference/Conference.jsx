@@ -1,1309 +1,1587 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { useAuth } from "../../context/AuthContext";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { useNavigate, useParams } from "react-router-dom";
+
 import apiClient from "../../api/client";
+import { useAuth } from "../../context/AuthContext";
 import styles from "./Conference.module.scss";
 
-const ICE_SERVERS = [
-  { urls: "stun:stun.l.google.com:19302" },
-  { urls: "stun:stun1.l.google.com:19302" },
-];
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
-const WS_URL =
-  import.meta.env.VITE_WS_URL || API_URL.replace(/^http/i, "ws").replace(/\/$/, "");
+const API_URL =
+  import.meta.env.VITE_API_URL || "http://localhost:8000";
 
-const getErrorMessage = (error, fallback) => {
-  const detail = error.response?.data?.detail;
-  if (typeof detail === "string") return detail;
-  if (!error.response) return "Не удалось подключиться к серверу";
-  return fallback;
+const WS_URL = API_URL.replace(/^http/, "ws");
+
+const RTC_CONFIGURATION = {
+  iceServers: [
+    {
+      urls: [
+        "stun:stun.l.google.com:19302",
+        "stun:stun1.l.google.com:19302",
+      ],
+    },
+  ],
 };
 
-const isRoomActive = (room) => {
-  const status = String(room?.status || "active").toLowerCase();
-  return status === "active";
-};
 
-const getRoomStatusError = (room) =>
-  isRoomActive(room) ? "" : "Эта конференция уже завершена";
+function getInitial(username) {
+  const normalizedUsername = username?.trim();
 
-const decodeTokenPayload = (token) => {
-  try {
-    const rawPayload = token.split(".")[1];
-    const normalized = rawPayload.replace(/-/g, "+").replace(/_/g, "/");
-    const padded = normalized.padEnd(
-      normalized.length + ((4 - (normalized.length % 4)) % 4),
-      "=",
-    );
-    return JSON.parse(window.atob(padded));
-  } catch {
-    return null;
-  }
-};
+  return normalizedUsername
+    ? normalizedUsername[0].toUpperCase()
+    : "?";
+}
 
-const createClientId = () => {
-  if (window.crypto?.randomUUID) return window.crypto.randomUUID();
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-};
 
-function MicIcon({ off = false }) {
-  return (
-    <svg viewBox="0 0 32 32" aria-hidden="true">
-      <rect x="11" y="4" width="10" height="16" rx="5" />
-      <path d="M7 15a9 9 0 0 0 18 0M16 24v5M11 29h10" />
-      {off && <path className={styles.slash} d="M4 4l24 24" />}
+function VideoIcon({ disabled = false }) {
+  return disabled ? (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M3 3 21 21" />
+      <path d="M10 6H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h10" />
+      <path d="M14 6h2a2 2 0 0 1 2 2v2l3-2v8l-3-2" />
+    </svg>
+  ) : (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="3" y="6" width="15" height="12" rx="2" />
+      <path d="m18 10 3-2v8l-3-2" />
     </svg>
   );
 }
 
-function CameraIcon({ off = false }) {
-  return (
-    <svg viewBox="0 0 32 32" aria-hidden="true">
-      <rect x="4" y="8" width="18" height="16" rx="4" />
-      <path d="m22 13 6-4v14l-6-4" />
-      {off && <path className={styles.slash} d="M4 4l24 24" />}
+
+function MicrophoneIcon({ disabled = false }) {
+  return disabled ? (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M3 3 21 21" />
+      <path d="M9 9v3a3 3 0 0 0 4.5 2.6" />
+      <path d="M15 9V5a3 3 0 0 0-5.7-1.3" />
+      <path d="M5 10v2a7 7 0 0 0 11.7 5.2" />
+      <path d="M19 10v2a7 7 0 0 1-.4 2.3" />
+      <path d="M12 19v3" />
+      <path d="M8 22h8" />
+    </svg>
+  ) : (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="9" y="3" width="6" height="12" rx="3" />
+      <path d="M5 10v2a7 7 0 0 0 14 0v-2" />
+      <path d="M12 19v3" />
+      <path d="M8 22h8" />
     </svg>
   );
 }
+
 
 function ScreenIcon() {
   return (
-    <svg viewBox="0 0 32 32" aria-hidden="true">
-      <rect x="3" y="5" width="26" height="18" rx="3" />
-      <path d="M11 28h10M16 23v5M11 14l5-5 5 5M16 9v10" />
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="3" y="3" width="18" height="14" rx="2" />
+      <path d="M8 21h8" />
+      <path d="M12 17v4" />
+      <path d="m9 10 3-3 3 3" />
+      <path d="M12 7v7" />
     </svg>
   );
 }
 
-function CopyIcon() {
+
+function LinkIcon() {
   return (
-    <svg viewBox="0 0 32 32" aria-hidden="true">
-      <rect x="10" y="10" width="17" height="17" rx="3" />
-      <path d="M22 10V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h3" />
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M10 13a5 5 0 0 0 7.1.1l2-2a5 5 0 0 0-7.1-7.1l-1.1 1.1" />
+      <path d="M14 11a5 5 0 0 0-7.1-.1l-2 2A5 5 0 0 0 12 20l1.1-1.1" />
     </svg>
   );
 }
 
-function HangupIcon() {
+
+function PhoneIcon() {
   return (
-    <svg viewBox="0 0 32 32" aria-hidden="true">
-      <path d="M5 21c3-3 6.7-4.5 11-4.5S24 18 27 21" />
-      <path d="M5 21v5M27 21v5" />
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M6.6 10.8a15.5 15.5 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.2 11 11 0 0 0 3.6.6 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.4a1 1 0 0 1 1 1 11 11 0 0 0 .6 3.6 1 1 0 0 1-.2 1Z" />
     </svg>
   );
 }
 
-function PeopleIcon() {
-  return (
-    <svg viewBox="0 0 32 32" aria-hidden="true">
-      <circle cx="11" cy="11" r="5" />
-      <circle cx="22" cy="11" r="5" />
-      <path d="M2 28c.4-8 3.5-12 9-12 4 0 6.7 2.1 8 6" />
-      <path d="M13 28c.4-8 3.5-12 9-12s8.6 4 9 12H13Z" />
-    </svg>
-  );
-}
 
-function VideoTile({
-  stream,
-  name,
-  videoMuted = false,
-  isMicOff = false,
-  videoOff = false,
-  isLocal = false,
-  mirror = false,
-  isPresentation = false,
+function ParticipantTile({
+  participant,
   compact = false,
 }) {
-  const videoRef = useRef(null);
+  const setVideoElement = useCallback(
+    (videoElement) => {
+      if (
+        videoElement &&
+        participant.stream &&
+        videoElement.srcObject !== participant.stream
+      ) {
+        videoElement.srcObject = participant.stream;
+      }
+    },
+    [participant.stream],
+  );
 
-  useEffect(() => {
-    if (videoRef.current) {
-      videoRef.current.srcObject = stream || null;
-    }
-  }, [stream]);
-
-  const initials = (name || "Участник")
-    .split(/\s+/)
+  const className = [
+    styles.participantTile,
+    compact ? styles.compactTile : "",
+    participant.isSharing ? styles.screenTile : "",
+  ]
     .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase())
-    .join("");
+    .join(" ");
 
   return (
-    <article
-      className={`${styles.videoTile} ${
-        isPresentation ? styles.presentationTile : ""
-      } ${compact ? styles.compactTile : ""}`}
-    >
-      <video
-        ref={videoRef}
-        autoPlay
-        playsInline
-        muted={videoMuted}
-        className={`${videoOff ? styles.videoHidden : ""} ${
-          mirror ? styles.mirroredVideo : ""
-        }`}
-      />
-
-      {(!stream || videoOff) && (
-        <div className={styles.avatar} aria-hidden="true">
-          {initials || "У"}
+    <article className={className}>
+      {participant.hasVideo && participant.stream ? (
+        <video
+          ref={setVideoElement}
+          autoPlay
+          playsInline
+          muted={participant.isLocal}
+          className={styles.participantVideo}
+        />
+      ) : (
+        <div className={styles.avatar}>
+          {getInitial(participant.username)}
         </div>
       )}
 
-      <div className={styles.tileFooter}>
+      <div className={styles.participantFooter}>
         <span className={styles.participantName}>
-          {isLocal ? `${name || "Вы"} (вы)` : name || "Участник"}
+          {participant.username}
+          {participant.isLocal ? " (Вы)" : ""}
         </span>
 
-        {(isMicOff || videoOff) && (
-          <div className={styles.mediaBadges} aria-label="Статус устройств">
-            {isMicOff && <MicIcon off />}
-            {videoOff && <CameraIcon off />}
-          </div>
+        {participant.isMuted && (
+          <span
+            className={styles.mutedBadge}
+            title="Микрофон выключен"
+          >
+            <MicrophoneIcon disabled />
+          </span>
         )}
       </div>
     </article>
   );
 }
 
+
 function Conference() {
-  const { inviteCode: rawInviteCode } = useParams();
-  const inviteCode = useMemo(
-    () => decodeURIComponent(rawInviteCode || "").trim().toUpperCase(),
-    [rawInviteCode],
-  );
-  const location = useLocation();
+  const { inviteCode } = useParams();
   const navigate = useNavigate();
-  const { user, loading: authLoading, isAuthenticated } = useAuth();
 
-  const token = localStorage.getItem("token");
-  const tokenPayload = decodeTokenPayload(token || "");
-  const currentUserId = user?.id || tokenPayload?.sub || null;
-  const currentUsername = user?.username || "Участник";
+  const {
+    user,
+    loading: authLoading,
+    isAuthenticated,
+  } = useAuth();
 
-  const [room, setRoom] = useState(location.state?.room || null);
-  const [pageLoading, setPageLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [connectionState, setConnectionState] = useState("connecting");
-  const [localPreview, setLocalPreview] = useState(null);
-  const [remoteParticipants, setRemoteParticipants] = useState([]);
-  const [micEnabled, setMicEnabled] = useState(true);
+  const [room, setRoom] = useState(null);
+  const [roomParticipants, setRoomParticipants] =
+    useState([]);
+
+  const [cameraStream, setCameraStream] = useState(null);
+  const [screenStream, setScreenStream] = useState(null);
+  const [remoteStreams, setRemoteStreams] = useState({});
+  const [remoteMedia, setRemoteMedia] = useState({});
+
   const [cameraEnabled, setCameraEnabled] = useState(true);
-  const [isSharing, setIsSharing] = useState(false);
+  const [microphoneEnabled, setMicrophoneEnabled] =
+    useState(true);
+
+  const [isConnecting, setIsConnecting] = useState(true);
+  const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
-  const [participantsOpen, setParticipantsOpen] = useState(false);
 
-  const clientIdRef = useRef(createClientId());
-  const wsRef = useRef(null);
-  const localStreamRef = useRef(null);
-  const cameraTrackRef = useRef(null);
-  const screenTrackRef = useRef(null);
+  const websocketRef = useRef(null);
   const peerConnectionsRef = useRef(new Map());
-  const remoteStreamsRef = useRef(new Map());
-  const queuedCandidatesRef = useRef(new Map());
-  const isLeavingRef = useRef(false);
-  const micEnabledRef = useRef(true);
-  const cameraEnabledRef = useRef(true);
-  const isSharingRef = useRef(false);
-  const sessionLockKeyRef = useRef(null);
-  const sessionHeartbeatRef = useRef(null);
-  const redirectTimerRef = useRef(null);
+  const pendingCandidatesRef = useRef(new Map());
 
-  useEffect(() => {
-    const previousBodyOverflow = document.body.style.overflow;
-    const previousHtmlOverflow = document.documentElement.style.overflow;
-    const previousBodyOverscroll = document.body.style.overscrollBehavior;
+  const cameraStreamRef = useRef(null);
+  const screenStreamRef = useRef(null);
+  const mountedRef = useRef(true);
 
-    document.body.style.overflow = "hidden";
-    document.documentElement.style.overflow = "hidden";
-    document.body.style.overscrollBehavior = "none";
 
-    return () => {
-      document.body.style.overflow = previousBodyOverflow;
-      document.documentElement.style.overflow = previousHtmlOverflow;
-      document.body.style.overscrollBehavior = previousBodyOverscroll;
-    };
+  const sendSignal = useCallback((payload) => {
+    const websocket = websocketRef.current;
+
+    if (websocket?.readyState === WebSocket.OPEN) {
+      websocket.send(JSON.stringify(payload));
+    }
   }, []);
 
-  const updateRemoteParticipant = useCallback((peerId, patch) => {
-    setRemoteParticipants((current) => {
-      const existing = current.find((participant) => participant.peerId === peerId);
 
-      if (existing) {
-        return current.map((participant) =>
-          participant.peerId === peerId ? { ...participant, ...patch } : participant,
-        );
-      }
+  const getCurrentVideoTrack = useCallback(() => {
+    const screenTrack =
+      screenStreamRef.current?.getVideoTracks()[0];
 
-      return [
-        ...current,
-        {
-          peerId,
-          userId: null,
-          username: "Участник",
-          stream: null,
-          isMuted: false,
-          isVideoOff: false,
-          ...patch,
-        },
-      ];
-    });
-  }, []);
+    if (screenTrack) {
+      return screenTrack;
+    }
 
-  const removePeer = useCallback((peerId) => {
-    const connection = peerConnectionsRef.current.get(peerId);
-    if (connection) connection.close();
-
-    peerConnectionsRef.current.delete(peerId);
-    remoteStreamsRef.current.delete(peerId);
-    queuedCandidatesRef.current.delete(peerId);
-    setRemoteParticipants((current) =>
-      current.filter((participant) => participant.peerId !== peerId),
+    return (
+      cameraStreamRef.current?.getVideoTracks()[0] ||
+      null
     );
   }, []);
 
-  const sendSignal = useCallback((message) => {
-    const socket = wsRef.current;
-    if (socket?.readyState !== WebSocket.OPEN) return;
 
-    socket.send(
-      JSON.stringify({
-        ...message,
-        from: clientIdRef.current,
-        userId: currentUserId,
-        username: currentUsername,
-      }),
-    );
-  }, [currentUserId, currentUsername]);
+  const getVideoSender = useCallback((peerConnection) => {
+    const directSender = peerConnection
+      .getSenders()
+      .find((sender) => sender.track?.kind === "video");
 
-  const flushQueuedCandidates = useCallback(async (peerId, connection) => {
-    const queued = queuedCandidatesRef.current.get(peerId) || [];
-
-    for (const candidate of queued) {
-      try {
-        await connection.addIceCandidate(candidate);
-      } catch (candidateError) {
-        console.error("Не удалось добавить ICE-кандидат", candidateError);
-      }
+    if (directSender) {
+      return directSender;
     }
 
-    queuedCandidatesRef.current.delete(peerId);
+    return peerConnection
+      .getTransceivers()
+      .find(
+        (transceiver) =>
+          transceiver.receiver?.track?.kind === "video",
+      )?.sender;
   }, []);
 
-  const createPeerConnection = useCallback(
-    (peerId, username, userId = null) => {
-      const existing = peerConnectionsRef.current.get(peerId);
-      if (existing) {
-        if (username || userId) {
-          updateRemoteParticipant(peerId, {
-            ...(username ? { username } : {}),
-            ...(userId ? { userId } : {}),
-          });
-        }
-        return existing;
-      }
 
-      const connection = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-      peerConnectionsRef.current.set(peerId, connection);
-      updateRemoteParticipant(peerId, {
-        username: username || "Участник",
-        userId,
-      });
+  const flushPendingCandidates = useCallback(
+    async (remoteUserId, peerConnection) => {
+      const pendingCandidates =
+        pendingCandidatesRef.current.get(remoteUserId) ||
+        [];
 
-      localStreamRef.current?.getTracks().forEach((track) => {
-        connection.addTrack(track, localStreamRef.current);
-      });
-
-      connection.onicecandidate = (event) => {
-        if (!event.candidate) return;
-        sendSignal({ type: "ice-candidate", target: peerId, candidate: event.candidate });
-      };
-
-      connection.ontrack = (event) => {
-        let remoteStream = event.streams?.[0];
-
-        if (!remoteStream) {
-          remoteStream = remoteStreamsRef.current.get(peerId) || new MediaStream();
-          remoteStream.addTrack(event.track);
-        }
-
-        remoteStreamsRef.current.set(peerId, remoteStream);
-        updateRemoteParticipant(peerId, { stream: remoteStream });
-      };
-
-      connection.onconnectionstatechange = () => {
-        if (["failed", "closed"].includes(connection.connectionState)) {
-          removePeer(peerId);
-        }
-      };
-
-      return connection;
-    },
-    [removePeer, sendSignal, updateRemoteParticipant],
-  );
-
-  const createOffer = useCallback(
-    async (peerId, username, userId = null) => {
-      try {
-        const connection = createPeerConnection(peerId, username, userId);
-        const offer = await connection.createOffer();
-        await connection.setLocalDescription(offer);
-
-        sendSignal({
-          type: "offer",
-          target: peerId,
-          sdp: connection.localDescription,
-        });
-      } catch (offerError) {
-        console.error("Не удалось создать WebRTC offer", offerError);
-      }
-    },
-    [createPeerConnection, sendSignal],
-  );
-
-  const broadcastMediaStatus = useCallback(
-    (next = {}) => {
-      sendSignal({
-        type: "media-status",
-        isMuted: next.isMuted ?? !micEnabledRef.current,
-        isVideoOff: next.isVideoOff ?? !cameraEnabledRef.current,
-        isScreenSharing: next.isScreenSharing ?? isSharingRef.current,
-      });
-    },
-    [sendSignal],
-  );
-
-  const updateStatusOnServer = useCallback(
-    async (statusPatch) => {
-      try {
-        await apiClient.patch(
-          `/rooms/${encodeURIComponent(inviteCode)}/participants/status`,
-          statusPatch,
-        );
-      } catch {
-        // Статус интерфейса уже изменён локально; запрос повторится при следующем действии.
-      }
-    },
-    [inviteCode],
-  );
-
-  const releaseSessionLock = useCallback(() => {
-    if (sessionHeartbeatRef.current) {
-      window.clearInterval(sessionHeartbeatRef.current);
-      sessionHeartbeatRef.current = null;
-    }
-
-    const key = sessionLockKeyRef.current;
-    if (!key) return;
-
-    try {
-      const current = JSON.parse(localStorage.getItem(key) || "null");
-      if (current?.clientId === clientIdRef.current) {
-        localStorage.removeItem(key);
-      }
-    } catch {
-      localStorage.removeItem(key);
-    }
-
-    sessionLockKeyRef.current = null;
-  }, []);
-
-  const claimSessionLock = useCallback(() => {
-    if (!currentUserId) return true;
-
-    const key = `talksphere:conference:${inviteCode}:${currentUserId}`;
-    const now = Date.now();
-    const ttl = 15000;
-
-    try {
-      const existing = JSON.parse(localStorage.getItem(key) || "null");
-      if (
-        existing?.clientId &&
-        existing.clientId !== clientIdRef.current &&
-        now - Number(existing.updatedAt || 0) < ttl
-      ) {
-        return false;
-      }
-    } catch {
-      // Поврежденная блокировка будет перезаписана ниже.
-    }
-
-    const writeLock = () => {
-      localStorage.setItem(
-        key,
-        JSON.stringify({
-          clientId: clientIdRef.current,
-          updatedAt: Date.now(),
-        }),
-      );
-    };
-
-    writeLock();
-    sessionLockKeyRef.current = key;
-    sessionHeartbeatRef.current = window.setInterval(writeLock, 5000);
-    return true;
-  }, [currentUserId, inviteCode]);
-
-  const handleSignalMessage = useCallback(
-    async (event) => {
-      let message;
-
-      try {
-        message = JSON.parse(event.data);
-      } catch {
+      if (!peerConnection.remoteDescription) {
         return;
       }
 
-      if (!message?.type || message.from === clientIdRef.current) return;
-      if (message.target && message.target !== clientIdRef.current) return;
+      for (const candidate of pendingCandidates) {
+        try {
+          await peerConnection.addIceCandidate(candidate);
+        } catch (candidateError) {
+          console.error(
+            "Не удалось добавить ICE-кандидат:",
+            candidateError,
+          );
+        }
+      }
 
-      const peerId = message.from;
+      pendingCandidatesRef.current.delete(remoteUserId);
+    },
+    [],
+  );
+
+
+  const createPeerConnection = useCallback(
+    (remoteUserId) => {
+      const normalizedUserId = String(remoteUserId);
+
+      const existingConnection =
+        peerConnectionsRef.current.get(normalizedUserId);
+
+      if (existingConnection) {
+        return existingConnection;
+      }
+
+      const peerConnection = new RTCPeerConnection(
+        RTC_CONFIGURATION,
+      );
+
+      const currentCameraStream =
+        cameraStreamRef.current;
+
+      const audioTrack =
+        currentCameraStream?.getAudioTracks()[0] || null;
+
+      const videoTrack = getCurrentVideoTrack();
+
+      if (audioTrack) {
+        peerConnection.addTrack(
+          audioTrack,
+          currentCameraStream,
+        );
+      } else {
+        peerConnection.addTransceiver("audio", {
+          direction: "sendrecv",
+        });
+      }
+
+      if (videoTrack) {
+        const sourceStream =
+          screenStreamRef.current ||
+          currentCameraStream ||
+          new MediaStream([videoTrack]);
+
+        peerConnection.addTrack(videoTrack, sourceStream);
+      } else {
+        peerConnection.addTransceiver("video", {
+          direction: "sendrecv",
+        });
+      }
+
+      peerConnection.onicecandidate = (event) => {
+        if (!event.candidate) {
+          return;
+        }
+
+        sendSignal({
+          type: "ice-candidate",
+          target_user_id: normalizedUserId,
+          candidate: event.candidate,
+        });
+      };
+
+      peerConnection.ontrack = (event) => {
+        const incomingStream =
+          event.streams?.[0] ||
+          new MediaStream([event.track]);
+
+        setRemoteStreams((currentStreams) => ({
+          ...currentStreams,
+          [normalizedUserId]: incomingStream,
+        }));
+      };
+
+      peerConnection.onconnectionstatechange = () => {
+        const state = peerConnection.connectionState;
+
+        if (state === "failed" || state === "closed") {
+          peerConnection.close();
+          peerConnectionsRef.current.delete(
+            normalizedUserId,
+          );
+
+          setRemoteStreams((currentStreams) => {
+            const nextStreams = { ...currentStreams };
+            delete nextStreams[normalizedUserId];
+            return nextStreams;
+          });
+        }
+      };
+
+      peerConnectionsRef.current.set(
+        normalizedUserId,
+        peerConnection,
+      );
+
+      return peerConnection;
+    },
+    [getCurrentVideoTrack, sendSignal],
+  );
+
+
+  const createOfferFor = useCallback(
+    async (remoteUserId) => {
+      const normalizedUserId = String(remoteUserId);
+
+      if (
+        !normalizedUserId ||
+        normalizedUserId === String(user?.id)
+      ) {
+        return;
+      }
+
+      const peerConnection =
+        createPeerConnection(normalizedUserId);
 
       try {
-        if (message.type === "duplicate-session") {
-          isLeavingRef.current = true;
-          setConnectionState("error");
-          setError("Эта учетная запись уже подключена к конференции");
-          wsRef.current?.close(1000, "Duplicate session");
-          peerConnectionsRef.current.forEach((connection) => connection.close());
-          localStreamRef.current?.getTracks().forEach((track) => track.stop());
-          releaseSessionLock();
-          redirectTimerRef.current = window.setTimeout(() => {
-            navigate("/meetings", { replace: true });
-          }, 1800);
-          return;
-        }
+        const offer =
+          await peerConnection.createOffer();
 
-        if (message.type === "join") {
-          if (
-            message.userId &&
-            currentUserId &&
-            String(message.userId) === String(currentUserId)
-          ) {
-            sendSignal({
-              type: "duplicate-session",
-              target: peerId,
-            });
-            return;
-          }
+        await peerConnection.setLocalDescription(offer);
 
-          await createOffer(peerId, message.username, message.userId);
-          broadcastMediaStatus();
-          return;
-        }
-
-        if (message.type === "offer") {
-          const connection = createPeerConnection(
-            peerId,
-            message.username,
-            message.userId,
-          );
-          await connection.setRemoteDescription(message.sdp);
-          await flushQueuedCandidates(peerId, connection);
-
-          const answer = await connection.createAnswer();
-          await connection.setLocalDescription(answer);
-          sendSignal({
-            type: "answer",
-            target: peerId,
-            sdp: connection.localDescription,
-          });
-          broadcastMediaStatus();
-          return;
-        }
-
-        if (message.type === "answer") {
-          const connection = peerConnectionsRef.current.get(peerId);
-          if (!connection) return;
-
-          await connection.setRemoteDescription(message.sdp);
-          await flushQueuedCandidates(peerId, connection);
-          return;
-        }
-
-        if (message.type === "ice-candidate") {
-          const connection =
-            peerConnectionsRef.current.get(peerId) ||
-            createPeerConnection(peerId, message.username, message.userId);
-
-          if (connection.remoteDescription) {
-            await connection.addIceCandidate(message.candidate);
-          } else {
-            const queued = queuedCandidatesRef.current.get(peerId) || [];
-            queued.push(message.candidate);
-            queuedCandidatesRef.current.set(peerId, queued);
-          }
-          return;
-        }
-
-        if (message.type === "media-status") {
-          updateRemoteParticipant(peerId, {
-            username: message.username || "Участник",
-            userId: message.userId || null,
-            isMuted: Boolean(message.isMuted),
-            isVideoOff: Boolean(message.isVideoOff),
-            isScreenSharing: Boolean(message.isScreenSharing),
-          });
-          return;
-        }
-
-        if (message.type === "leave") removePeer(peerId);
-      } catch (signalError) {
-        console.error("Ошибка обработки сигнального сообщения", signalError);
+        sendSignal({
+          type: "offer",
+          target_user_id: normalizedUserId,
+          sdp: peerConnection.localDescription,
+        });
+      } catch (offerError) {
+        console.error(
+          "Не удалось создать WebRTC offer:",
+          offerError,
+        );
       }
     },
     [
-      broadcastMediaStatus,
-      createOffer,
       createPeerConnection,
-      flushQueuedCandidates,
-      currentUserId,
-      navigate,
-      releaseSessionLock,
-      removePeer,
       sendSignal,
-      updateRemoteParticipant,
+      user?.id,
     ],
   );
 
-  const acquireInitialMedia = useCallback(async () => {
-    try {
-      return await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: true,
+
+  const closeRemoteParticipant = useCallback(
+    (remoteUserId) => {
+      const normalizedUserId = String(remoteUserId);
+
+      const peerConnection =
+        peerConnectionsRef.current.get(normalizedUserId);
+
+      if (peerConnection) {
+        peerConnection.close();
+        peerConnectionsRef.current.delete(
+          normalizedUserId,
+        );
+      }
+
+      pendingCandidatesRef.current.delete(
+        normalizedUserId,
+      );
+
+      setRemoteStreams((currentStreams) => {
+        const nextStreams = { ...currentStreams };
+        delete nextStreams[normalizedUserId];
+        return nextStreams;
       });
-    } catch (combinedError) {
-      const stream = new MediaStream();
 
-      try {
-        const videoStream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-          audio: false,
-        });
-        videoStream.getVideoTracks().forEach((track) => stream.addTrack(track));
-      } catch (videoError) {
-        console.warn("Камера недоступна", videoError);
+      setRemoteMedia((currentMedia) => {
+        const nextMedia = { ...currentMedia };
+        delete nextMedia[normalizedUserId];
+        return nextMedia;
+      });
+    },
+    [],
+  );
+
+
+  const loadRoom = useCallback(async () => {
+    try {
+      const response = await apiClient.get(
+        `/rooms/${inviteCode}`,
+      );
+
+      const roomData = response.data;
+
+      if (roomData.status === "ended") {
+        setError("Эта конференция уже завершена");
+        return false;
       }
 
-      try {
-        const audioStream = await navigator.mediaDevices.getUserMedia({
-          video: false,
-          audio: true,
-        });
-        audioStream.getAudioTracks().forEach((track) => stream.addTrack(track));
-      } catch (audioError) {
-        console.warn("Микрофон недоступен", audioError);
+      if (mountedRef.current) {
+        setRoom(roomData);
+        setRoomParticipants(
+          roomData.participants || [],
+        );
       }
 
-      if (stream.getTracks().length === 0) {
-        console.warn("Камера и микрофон недоступны", combinedError);
+      return true;
+    } catch (requestError) {
+      if (mountedRef.current) {
+        setError(
+          requestError.response?.data?.detail ||
+            "Не удалось загрузить конференцию",
+        );
       }
 
-      return stream;
+      return false;
     }
-  }, []);
+  }, [inviteCode]);
 
-  const stopMedia = useCallback(() => {
-    screenTrackRef.current?.stop();
-    localStreamRef.current?.getTracks().forEach((track) => track.stop());
-    screenTrackRef.current = null;
-    cameraTrackRef.current = null;
-    localStreamRef.current = null;
-    setLocalPreview(null);
-  }, []);
 
-  const closeConnections = useCallback(() => {
-    peerConnectionsRef.current.forEach((connection) => connection.close());
-    peerConnectionsRef.current.clear();
-    remoteStreamsRef.current.clear();
-    queuedCandidatesRef.current.clear();
-  }, []);
+  const updateMediaStatus = useCallback(
+    async (statusUpdate) => {
+      setRoomParticipants((currentParticipants) =>
+        currentParticipants.map((participant) =>
+          String(participant.user_id) ===
+          String(user?.id)
+            ? {
+                ...participant,
+                ...statusUpdate,
+              }
+            : participant,
+        ),
+      );
+
+      sendSignal({
+        type: "media-state",
+        ...statusUpdate,
+      });
+
+      try {
+        await apiClient.patch(
+          `/rooms/${inviteCode}/participants/status`,
+          statusUpdate,
+        );
+      } catch (statusError) {
+        console.error(
+          "Не удалось обновить статус участника:",
+          statusError,
+        );
+      }
+    },
+    [inviteCode, sendSignal, user?.id],
+  );
+
+
+  const handleSignalMessage = useCallback(
+    async (message) => {
+      const {
+        type,
+        from_user_id: fromUserId,
+        from_username: fromUsername,
+      } = message;
+
+      if (type === "room_state") {
+        const existingParticipants =
+          message.participants || [];
+
+        setRoomParticipants((currentParticipants) => {
+          const participantsMap = new Map(
+            currentParticipants.map((participant) => [
+              String(participant.user_id),
+              participant,
+            ]),
+          );
+
+          for (const participant of existingParticipants) {
+            const participantId = String(
+              participant.user_id,
+            );
+
+            if (!participantsMap.has(participantId)) {
+              participantsMap.set(participantId, {
+                ...participant,
+                is_muted: false,
+                is_video_off: true,
+                is_screen_sharing: false,
+              });
+            }
+          }
+
+          return Array.from(participantsMap.values());
+        });
+
+        for (const participant of existingParticipants) {
+          await createOfferFor(participant.user_id);
+        }
+
+        return;
+      }
+
+      if (type === "participant_joined") {
+        const participantId = String(
+          message.user_id,
+        );
+
+        setRoomParticipants((currentParticipants) => {
+          const exists = currentParticipants.some(
+            (participant) =>
+              String(participant.user_id) ===
+              participantId,
+          );
+
+          if (exists) {
+            return currentParticipants;
+          }
+
+          return [
+            ...currentParticipants,
+            {
+              user_id: participantId,
+              username:
+                message.username || "Участник",
+              is_muted: false,
+              is_video_off: true,
+              is_screen_sharing: false,
+            },
+          ];
+        });
+
+        return;
+      }
+
+      if (type === "participant_left") {
+        const participantId = String(
+          message.user_id,
+        );
+
+        closeRemoteParticipant(participantId);
+
+        setRoomParticipants((currentParticipants) =>
+          currentParticipants.filter(
+            (participant) =>
+              String(participant.user_id) !==
+              participantId,
+          ),
+        );
+
+        return;
+      }
+
+      if (!fromUserId) {
+        return;
+      }
+
+      const normalizedRemoteId = String(fromUserId);
+
+      setRoomParticipants((currentParticipants) => {
+        const exists = currentParticipants.some(
+          (participant) =>
+            String(participant.user_id) ===
+            normalizedRemoteId,
+        );
+
+        if (exists) {
+          return currentParticipants;
+        }
+
+        return [
+          ...currentParticipants,
+          {
+            user_id: normalizedRemoteId,
+            username: fromUsername || "Участник",
+            is_muted: false,
+            is_video_off: true,
+            is_screen_sharing: false,
+          },
+        ];
+      });
+
+      if (type === "offer") {
+        const peerConnection =
+          createPeerConnection(normalizedRemoteId);
+
+        await peerConnection.setRemoteDescription(
+          new RTCSessionDescription(message.sdp),
+        );
+
+        await flushPendingCandidates(
+          normalizedRemoteId,
+          peerConnection,
+        );
+
+        const answer =
+          await peerConnection.createAnswer();
+
+        await peerConnection.setLocalDescription(answer);
+
+        sendSignal({
+          type: "answer",
+          target_user_id: normalizedRemoteId,
+          sdp: peerConnection.localDescription,
+        });
+
+        return;
+      }
+
+      if (type === "answer") {
+        const peerConnection =
+          peerConnectionsRef.current.get(
+            normalizedRemoteId,
+          );
+
+        if (!peerConnection) {
+          return;
+        }
+
+        await peerConnection.setRemoteDescription(
+          new RTCSessionDescription(message.sdp),
+        );
+
+        await flushPendingCandidates(
+          normalizedRemoteId,
+          peerConnection,
+        );
+
+        return;
+      }
+
+      if (type === "ice-candidate") {
+        const peerConnection =
+          createPeerConnection(normalizedRemoteId);
+
+        const candidate = new RTCIceCandidate(
+          message.candidate,
+        );
+
+        if (peerConnection.remoteDescription) {
+          try {
+            await peerConnection.addIceCandidate(
+              candidate,
+            );
+          } catch (candidateError) {
+            console.error(
+              "Не удалось добавить ICE-кандидат:",
+              candidateError,
+            );
+          }
+        } else {
+          const currentCandidates =
+            pendingCandidatesRef.current.get(
+              normalizedRemoteId,
+            ) || [];
+
+          pendingCandidatesRef.current.set(
+            normalizedRemoteId,
+            [...currentCandidates, candidate],
+          );
+        }
+
+        return;
+      }
+
+      if (
+        type === "media-state" ||
+        type === "status_update"
+      ) {
+        const mediaUpdate = {
+          is_muted: Boolean(message.is_muted),
+          is_video_off: Boolean(
+            message.is_video_off,
+          ),
+          is_screen_sharing: Boolean(
+            message.is_screen_sharing,
+          ),
+        };
+
+        setRemoteMedia((currentMedia) => ({
+          ...currentMedia,
+          [normalizedRemoteId]: {
+            ...currentMedia[normalizedRemoteId],
+            ...mediaUpdate,
+          },
+        }));
+
+        setRoomParticipants((currentParticipants) =>
+          currentParticipants.map((participant) =>
+            String(participant.user_id) ===
+            normalizedRemoteId
+              ? {
+                  ...participant,
+                  ...mediaUpdate,
+                }
+              : participant,
+          ),
+        );
+      }
+    },
+    [
+      closeRemoteParticipant,
+      createOfferFor,
+      createPeerConnection,
+      flushPendingCandidates,
+      sendSignal,
+    ],
+  );
+
 
   useEffect(() => {
-    if (authLoading) return undefined;
+    mountedRef.current = true;
 
-    if (!isAuthenticated || !token) {
-      const path = `/conference/${encodeURIComponent(inviteCode)}`;
-      sessionStorage.setItem("redirect_after_login", path);
-      navigate("/login", {
-        replace: true,
-        state: {
-          from: path,
-          message: "Для подключения к конференции необходимо войти",
-        },
-      });
-      return undefined;
+    const previousBodyOverflow =
+      document.body.style.overflow;
+
+    const previousHtmlOverflow =
+      document.documentElement.style.overflow;
+
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow =
+      "hidden";
+
+    return () => {
+      mountedRef.current = false;
+
+      document.body.style.overflow =
+        previousBodyOverflow;
+
+      document.documentElement.style.overflow =
+        previousHtmlOverflow;
+    };
+  }, []);
+
+
+  useEffect(() => {
+    if (authLoading) {
+      return;
     }
 
-    if (!claimSessionLock()) {
-      setRoom(null);
-      setError("Эта учетная запись уже подключена к конференции в другой вкладке");
-      setConnectionState("error");
-      setPageLoading(false);
-      return undefined;
+    if (!isAuthenticated) {
+      localStorage.setItem(
+        "return_after_login",
+        `/conference/${inviteCode}`,
+      );
+
+      navigate("/login", { replace: true });
+      return;
     }
 
     let cancelled = false;
-    let participantPoll;
 
-    const handleBeforeUnload = () => releaseSessionLock();
-    window.addEventListener("beforeunload", handleBeforeUnload);
+    const initializeConference = async () => {
+      setIsConnecting(true);
+      setError("");
 
-    const initialize = async () => {
+      const roomAvailable = await loadRoom();
+
+      if (!roomAvailable || cancelled) {
+        setIsConnecting(false);
+        return;
+      }
+
       try {
-        const roomResponse = await apiClient.get(
-          `/rooms/${encodeURIComponent(inviteCode)}`,
-        );
-
-        if (cancelled) return;
-
-        const statusError = getRoomStatusError(roomResponse.data);
-        if (statusError) {
-          setRoom(null);
-          setError(statusError);
-          setConnectionState("error");
-          return;
-        }
-
-        setRoom(roomResponse.data);
-
-        const mediaStream = await acquireInitialMedia();
-        const hasMicrophone = mediaStream.getAudioTracks().length > 0;
-        const hasCamera = mediaStream.getVideoTracks().length > 0;
-
-        micEnabledRef.current = hasMicrophone;
-        cameraEnabledRef.current = hasCamera;
-        setMicEnabled(hasMicrophone);
-        setCameraEnabled(hasCamera);
+        const mediaStream =
+          await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: true,
+          });
 
         if (cancelled) {
-          mediaStream.getTracks().forEach((track) => track.stop());
+          mediaStream
+            .getTracks()
+            .forEach((track) => track.stop());
+
           return;
         }
 
-        localStreamRef.current = mediaStream;
-        cameraTrackRef.current = mediaStream.getVideoTracks()[0] || null;
-        setLocalPreview(mediaStream);
-
-        const socket = new WebSocket(
-          `${WS_URL}/ws/signal/${encodeURIComponent(inviteCode)}?token=${encodeURIComponent(token)}`,
+        cameraStreamRef.current = mediaStream;
+        setCameraStream(mediaStream);
+        setCameraEnabled(true);
+        setMicrophoneEnabled(true);
+      } catch (mediaError) {
+        console.warn(
+          "Камера или микрофон недоступны:",
+          mediaError,
         );
-        wsRef.current = socket;
 
-        socket.onopen = () => {
-          if (cancelled) return;
-          setConnectionState("connected");
-          sendSignal({ type: "join" });
-          broadcastMediaStatus({
-            isMuted: mediaStream.getAudioTracks().every((track) => !track.enabled),
-            isVideoOff: mediaStream.getVideoTracks().every((track) => !track.enabled),
-            isScreenSharing: isSharingRef.current,
-          });
-        };
+        cameraStreamRef.current =
+          new MediaStream();
 
-        socket.onmessage = handleSignalMessage;
+        setCameraStream(
+          cameraStreamRef.current,
+        );
 
-        socket.onerror = () => {
-          if (!cancelled) {
-            setConnectionState("error");
-            setError("Не удалось подключиться к серверу конференции");
-          }
-        };
-
-        socket.onclose = () => {
-          if (!cancelled && !isLeavingRef.current) {
-            setConnectionState("error");
-            setError("Соединение с конференцией прерванo");
-          }
-        };
-
-        participantPoll = window.setInterval(async () => {
-          try {
-            const response = await apiClient.get(
-              `/rooms/${encodeURIComponent(inviteCode)}`,
-            );
-            if (!cancelled) {
-              if (!isRoomActive(response.data)) {
-                isLeavingRef.current = true;
-                setConnectionState("error");
-                setError("Конференция завершена");
-                wsRef.current?.close(1000, "Room ended");
-                releaseSessionLock();
-                redirectTimerRef.current = window.setTimeout(() => {
-                  navigate("/meetings", { replace: true });
-                }, 1800);
-                return;
-              }
-
-              setRoom(response.data);
-            }
-          } catch {
-            // Временная ошибка обновления списка не прерывает звонок.
-          }
-        }, 4000);
-      } catch (requestError) {
-        if (!cancelled) {
-          setError(getErrorMessage(requestError, "Конференция не найдена"));
-          setConnectionState("error");
-        }
-      } finally {
-        if (!cancelled) setPageLoading(false);
+        setCameraEnabled(false);
+        setMicrophoneEnabled(false);
       }
+
+      const token = localStorage.getItem("token");
+
+      const websocket = new WebSocket(
+        `${WS_URL}/ws/signal/${encodeURIComponent(
+          inviteCode,
+        )}?token=${encodeURIComponent(token)}`,
+      );
+
+      websocketRef.current = websocket;
+
+      websocket.onopen = () => {
+        if (!cancelled) {
+          setIsConnecting(false);
+
+          sendSignal({
+            type: "media-state",
+            is_muted: !microphoneEnabled,
+            is_video_off: !cameraEnabled,
+            is_screen_sharing: false,
+          });
+        }
+      };
+
+      websocket.onmessage = async (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          await handleSignalMessage(message);
+        } catch (messageError) {
+          console.error(
+            "Ошибка обработки WebSocket-сообщения:",
+            messageError,
+          );
+        }
+      };
+
+      websocket.onerror = () => {
+        if (!cancelled) {
+          setError(
+            "Не удалось подключиться к конференции",
+          );
+          setIsConnecting(false);
+        }
+      };
+
+      websocket.onclose = (event) => {
+        if (
+          !cancelled &&
+          event.code !== 1000 &&
+          event.code !== 4001
+        ) {
+          setError(
+            event.reason ||
+              "Соединение с конференцией закрыто",
+          );
+        }
+      };
     };
 
-    initialize();
+    initializeConference();
 
     return () => {
       cancelled = true;
-      if (participantPoll) window.clearInterval(participantPoll);
-      window.removeEventListener("beforeunload", handleBeforeUnload);
 
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(
-          JSON.stringify({
-            type: "leave",
-            from: clientIdRef.current,
-            userId: currentUserId,
-            username: currentUsername,
-          }),
-        );
+      websocketRef.current?.close(1000);
+      websocketRef.current = null;
+
+      for (const peerConnection of
+        peerConnectionsRef.current.values()) {
+        peerConnection.close();
       }
 
-      wsRef.current?.close();
-      wsRef.current = null;
-      closeConnections();
-      stopMedia();
-      releaseSessionLock();
-      if (redirectTimerRef.current) {
-        window.clearTimeout(redirectTimerRef.current);
-        redirectTimerRef.current = null;
-      }
+      peerConnectionsRef.current.clear();
+      pendingCandidatesRef.current.clear();
+
+      cameraStreamRef.current
+        ?.getTracks()
+        .forEach((track) => track.stop());
+
+      screenStreamRef.current
+        ?.getTracks()
+        .forEach((track) => track.stop());
     };
   }, [
-    acquireInitialMedia,
     authLoading,
-    broadcastMediaStatus,
-    claimSessionLock,
-    closeConnections,
-    currentUserId,
-    currentUsername,
+    cameraEnabled,
     handleSignalMessage,
     inviteCode,
     isAuthenticated,
+    loadRoom,
+    microphoneEnabled,
     navigate,
-    releaseSessionLock,
     sendSignal,
-    stopMedia,
-    token,
   ]);
 
-  const toggleMicrophone = async () => {
-    const nextEnabled = !micEnabled;
 
-    try {
-      let audioTrack = localStreamRef.current?.getAudioTracks()[0] || null;
+  useEffect(() => {
+    if (!isAuthenticated || error) {
+      return undefined;
+    }
 
-      if (nextEnabled && (!audioTrack || audioTrack.readyState === "ended")) {
-        const audioStream = await navigator.mediaDevices.getUserMedia({
-          video: false,
-          audio: true,
-        });
-        audioTrack = audioStream.getAudioTracks()[0] || null;
+    const intervalId = window.setInterval(
+      loadRoom,
+      1500,
+    );
 
-        if (audioTrack) {
-          const nextStream = new MediaStream([
-            ...localStreamRef.current?.getVideoTracks() || [],
-            audioTrack,
-          ]);
-          localStreamRef.current = nextStream;
-          setLocalPreview((current) =>
-            isSharingRef.current ? current : new MediaStream(nextStream.getTracks()),
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [error, isAuthenticated, loadRoom]);
+
+
+  const replaceVideoTrackForAll = useCallback(
+    async (videoTrack) => {
+      for (const [
+        remoteUserId,
+        peerConnection,
+      ] of peerConnectionsRef.current.entries()) {
+        const videoSender =
+          getVideoSender(peerConnection);
+
+        if (videoSender) {
+          await videoSender.replaceTrack(videoTrack);
+        } else if (videoTrack) {
+          peerConnection.addTrack(
+            videoTrack,
+            screenStreamRef.current ||
+              cameraStreamRef.current ||
+              new MediaStream([videoTrack]),
           );
 
-          for (const [peerId, connection] of peerConnectionsRef.current.entries()) {
-            const sender = connection
-              .getSenders()
-              .find((item) => item.track?.kind === "audio");
-
-            if (sender) await sender.replaceTrack(audioTrack);
-            else {
-              connection.addTrack(audioTrack, nextStream);
-              await createOffer(peerId);
-            }
-          }
+          await createOfferFor(remoteUserId);
         }
       }
+    },
+    [
+      createOfferFor,
+      getVideoSender,
+    ],
+  );
 
-      if (audioTrack) audioTrack.enabled = nextEnabled;
 
-      const actualEnabled = Boolean(audioTrack && nextEnabled);
-      micEnabledRef.current = actualEnabled;
-      setMicEnabled(actualEnabled);
-      broadcastMediaStatus({ isMuted: !actualEnabled });
-      await updateStatusOnServer({ is_muted: !actualEnabled });
+  const toggleMicrophone = async () => {
+    let audioTrack =
+      cameraStreamRef.current?.getAudioTracks()[0];
 
-      if (nextEnabled && !audioTrack) {
-        setError("Микрофон недоступен. Разрешите доступ в настройках браузера");
+    if (!audioTrack && !microphoneEnabled) {
+      try {
+        const audioStream =
+          await navigator.mediaDevices.getUserMedia({
+            audio: true,
+            video: false,
+          });
+
+        audioTrack = audioStream.getAudioTracks()[0];
+
+        const currentTracks =
+          cameraStreamRef.current?.getTracks() || [];
+
+        const updatedStream = new MediaStream([
+          ...currentTracks,
+          audioTrack,
+        ]);
+
+        cameraStreamRef.current = updatedStream;
+        setCameraStream(updatedStream);
+
+        for (const peerConnection of
+          peerConnectionsRef.current.values()) {
+          const audioSender = peerConnection
+            .getSenders()
+            .find(
+              (sender) =>
+                sender.track?.kind === "audio",
+            );
+
+          if (audioSender) {
+            await audioSender.replaceTrack(audioTrack);
+          }
+        }
+      } catch {
+        setError(
+          "Не удалось получить доступ к микрофону",
+        );
+        return;
       }
-    } catch {
-      setError("Не удалось включить микрофон. Проверьте разрешения браузера");
     }
+
+    if (!audioTrack) {
+      return;
+    }
+
+    const nextEnabled = !microphoneEnabled;
+    audioTrack.enabled = nextEnabled;
+
+    setMicrophoneEnabled(nextEnabled);
+
+    await updateMediaStatus({
+      is_muted: !nextEnabled,
+    });
   };
+
 
   const toggleCamera = async () => {
-    if (isSharing) return;
+    let videoTrack =
+      cameraStreamRef.current?.getVideoTracks()[0];
+
+    if (!videoTrack && !cameraEnabled) {
+      try {
+        const videoStream =
+          await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: false,
+          });
+
+        videoTrack = videoStream.getVideoTracks()[0];
+
+        const currentTracks =
+          cameraStreamRef.current?.getTracks() || [];
+
+        const updatedStream = new MediaStream([
+          ...currentTracks,
+          videoTrack,
+        ]);
+
+        cameraStreamRef.current = updatedStream;
+        setCameraStream(updatedStream);
+
+        if (!screenStreamRef.current) {
+          await replaceVideoTrackForAll(videoTrack);
+        }
+      } catch {
+        setError(
+          "Не удалось получить доступ к камере",
+        );
+        return;
+      }
+    }
+
+    if (!videoTrack) {
+      return;
+    }
 
     const nextEnabled = !cameraEnabled;
+    videoTrack.enabled = nextEnabled;
 
-    try {
-      let videoTrack = cameraTrackRef.current;
+    setCameraEnabled(nextEnabled);
 
-      if (nextEnabled && (!videoTrack || videoTrack.readyState === "ended")) {
-        const videoStream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-          audio: false,
-        });
-        videoTrack = videoStream.getVideoTracks()[0] || null;
-        cameraTrackRef.current = videoTrack;
-
-        if (videoTrack) {
-          const nextStream = new MediaStream([
-            videoTrack,
-            ...localStreamRef.current?.getAudioTracks() || [],
-          ]);
-          localStreamRef.current = nextStream;
-          setLocalPreview(new MediaStream(nextStream.getTracks()));
-
-          for (const [peerId, connection] of peerConnectionsRef.current.entries()) {
-            const sender = connection
-              .getSenders()
-              .find((item) => item.track?.kind === "video");
-
-            if (sender) await sender.replaceTrack(videoTrack);
-            else {
-              connection.addTrack(videoTrack, nextStream);
-              await createOffer(peerId);
-            }
-          }
-        }
-      }
-
-      if (videoTrack) videoTrack.enabled = nextEnabled;
-
-      const actualEnabled = Boolean(videoTrack && nextEnabled);
-      cameraEnabledRef.current = actualEnabled;
-      setCameraEnabled(actualEnabled);
-      broadcastMediaStatus({ isVideoOff: !actualEnabled });
-      await updateStatusOnServer({ is_video_off: !actualEnabled });
-
-      if (nextEnabled && !videoTrack) {
-        setError("Камера недоступна. Разрешите доступ в настройках браузера");
-      }
-    } catch {
-      setError("Не удалось включить камеру. Проверьте разрешения браузера");
+    if (!screenStreamRef.current) {
+      await replaceVideoTrackForAll(
+        nextEnabled ? videoTrack : null,
+      );
     }
+
+    await updateMediaStatus({
+      is_video_off: !nextEnabled,
+    });
   };
 
-  const stopScreenShare = useCallback(async () => {
-    const screenTrack = screenTrackRef.current;
-    if (!screenTrack) return;
 
-    screenTrack.onended = null;
-    screenTrack.stop();
-    screenTrackRef.current = null;
+  const stopScreenSharing = useCallback(async () => {
+    const currentScreenStream =
+      screenStreamRef.current;
 
-    const cameraTrack = cameraTrackRef.current;
-
-    for (const connection of peerConnectionsRef.current.values()) {
-      const sender = connection
-        .getSenders()
-        .find((item) => item.track?.kind === "video" || item.track === screenTrack);
-
-      if (sender) await sender.replaceTrack(cameraTrack || null);
+    if (!currentScreenStream) {
+      return;
     }
 
-    setLocalPreview(localStreamRef.current);
-    isSharingRef.current = false;
-    setIsSharing(false);
-    broadcastMediaStatus({ isScreenSharing: false, isVideoOff: !cameraEnabled });
-    await updateStatusOnServer({ is_screen_sharing: false });
-  }, [broadcastMediaStatus, cameraEnabled, updateStatusOnServer]);
+    currentScreenStream
+      .getTracks()
+      .forEach((track) => {
+        track.onended = null;
+        track.stop();
+      });
 
-  const toggleScreenShare = async () => {
-    if (isSharing) {
-      await stopScreenShare();
+    screenStreamRef.current = null;
+    setScreenStream(null);
+
+    const cameraTrack =
+      cameraStreamRef.current?.getVideoTracks()[0];
+
+    const replacementTrack =
+      cameraEnabled && cameraTrack
+        ? cameraTrack
+        : null;
+
+    await replaceVideoTrackForAll(replacementTrack);
+
+    await updateMediaStatus({
+      is_screen_sharing: false,
+      is_video_off: !cameraEnabled,
+    });
+  }, [
+    cameraEnabled,
+    replaceVideoTrackForAll,
+    updateMediaStatus,
+  ]);
+
+
+  const toggleScreenSharing = async () => {
+    if (screenStreamRef.current) {
+      await stopScreenSharing();
       return;
     }
 
     try {
-      const displayStream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
-        audio: false,
+      const displayStream =
+        await navigator.mediaDevices.getDisplayMedia({
+          video: true,
+          audio: false,
+        });
+
+      const screenTrack =
+        displayStream.getVideoTracks()[0];
+
+      screenStreamRef.current = displayStream;
+      setScreenStream(displayStream);
+
+      screenTrack.onended = () => {
+        stopScreenSharing();
+      };
+
+      await replaceVideoTrackForAll(screenTrack);
+
+      await updateMediaStatus({
+        is_screen_sharing: true,
       });
-      const screenTrack = displayStream.getVideoTracks()[0];
-      if (!screenTrack) return;
-
-      screenTrackRef.current = screenTrack;
-      screenTrack.onended = () => void stopScreenShare();
-
-      for (const [peerId, connection] of peerConnectionsRef.current.entries()) {
-        const videoSender = connection
-          .getSenders()
-          .find((sender) => sender.track?.kind === "video");
-
-        if (videoSender) {
-          await videoSender.replaceTrack(screenTrack);
-        } else {
-          connection.addTrack(screenTrack, displayStream);
-          await createOffer(peerId);
-        }
-      }
-
-      const preview = new MediaStream([
-        screenTrack,
-        ...localStreamRef.current?.getAudioTracks() || [],
-      ]);
-      setLocalPreview(preview);
-      isSharingRef.current = true;
-      setIsSharing(true);
-      broadcastMediaStatus({ isScreenSharing: true, isVideoOff: false });
-      await updateStatusOnServer({ is_screen_sharing: true });
-    } catch (shareError) {
-      if (shareError?.name !== "NotAllowedError") {
-        setError("Не удалось включить демонстрацию экрана");
+    } catch (screenError) {
+      if (screenError.name !== "NotAllowedError") {
+        setError(
+          "Не удалось запустить демонстрацию экрана",
+        );
       }
     }
   };
 
-  const copyMeetingLink = async () => {
-    const link = `${window.location.origin}/conference/${encodeURIComponent(inviteCode)}`;
+
+  const copyInviteLink = async () => {
+    const inviteLink = `${window.location.origin}/conference/${inviteCode}`;
 
     try {
-      await navigator.clipboard.writeText(link);
+      await navigator.clipboard.writeText(inviteLink);
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 1800);
+
+      window.setTimeout(() => {
+        setCopied(false);
+      }, 1600);
     } catch {
       setError("Не удалось скопировать ссылку");
     }
   };
 
-  const leaveConference = async () => {
-    isLeavingRef.current = true;
-    sendSignal({ type: "leave" });
 
+  const leaveConference = async () => {
     try {
-      await apiClient.post(`/rooms/${encodeURIComponent(inviteCode)}/leave`);
+      await apiClient.post(
+        `/rooms/${inviteCode}/leave`,
+      );
     } catch {
-      // Закрытие WebSocket также удаляет участника на текущем бэкенде.
+      // WebSocket всё равно будет закрыт,
+      // а бэкенд удалит участника.
     }
 
-    wsRef.current?.close();
-    closeConnections();
-    stopMedia();
-    releaseSessionLock();
+    websocketRef.current?.close(1000);
+
+    cameraStreamRef.current
+      ?.getTracks()
+      .forEach((track) => track.stop());
+
+    screenStreamRef.current
+      ?.getTracks()
+      .forEach((track) => track.stop());
+
     navigate("/meetings", { replace: true });
   };
 
-  const visibleRemoteParticipants = useMemo(() => {
-    const seenUsers = new Set();
 
-    return remoteParticipants.filter((participant) => {
-      const userKey = participant.userId
-        ? String(participant.userId)
-        : `peer:${participant.peerId}`;
+  const conferenceParticipants = useMemo(() => {
+    const participantsMap = new Map();
 
-      if (
-        participant.userId &&
-        currentUserId &&
-        String(participant.userId) === String(currentUserId)
-      ) {
-        return false;
+    for (const participant of roomParticipants) {
+      const participantId = String(
+        participant.user_id,
+      );
+
+      const isLocal =
+        participantId === String(user?.id);
+
+      const mediaState = isLocal
+        ? {}
+        : remoteMedia[participantId] || {};
+
+      const participantStream = isLocal
+        ? screenStream || cameraStream
+        : remoteStreams[participantId] || null;
+
+      const isSharing = isLocal
+        ? Boolean(screenStream)
+        : Boolean(
+            mediaState.is_screen_sharing ??
+              participant.is_screen_sharing,
+          );
+
+      const videoTracks =
+        participantStream?.getVideoTracks() || [];
+
+      const hasLiveVideoTrack = videoTracks.some(
+        (track) =>
+          track.readyState === "live" &&
+          track.enabled,
+      );
+
+      const isVideoOff = isLocal
+        ? !cameraEnabled
+        : Boolean(
+            mediaState.is_video_off ??
+              participant.is_video_off,
+          );
+
+      participantsMap.set(participantId, {
+        ...participant,
+        id: participantId,
+        isLocal,
+        stream: participantStream,
+        isSharing,
+        hasVideo:
+          isSharing ||
+          (!isVideoOff && hasLiveVideoTrack),
+        isMuted: isLocal
+          ? !microphoneEnabled
+          : Boolean(
+              mediaState.is_muted ??
+                participant.is_muted,
+            ),
+      });
+    }
+
+    if (
+      user?.id &&
+      !participantsMap.has(String(user.id))
+    ) {
+      const localStream =
+        screenStream || cameraStream;
+
+      const localVideoTrack =
+        localStream?.getVideoTracks()[0];
+
+      participantsMap.set(String(user.id), {
+        id: String(user.id),
+        user_id: String(user.id),
+        username: user.username || "Вы",
+        isLocal: true,
+        stream: localStream,
+        isSharing: Boolean(screenStream),
+        hasVideo: Boolean(
+          screenStream ||
+            (cameraEnabled &&
+              localVideoTrack?.enabled),
+        ),
+        isMuted: !microphoneEnabled,
+      });
+    }
+
+    for (const [
+      participantId,
+      participantStream,
+    ] of Object.entries(remoteStreams)) {
+      if (participantsMap.has(participantId)) {
+        continue;
       }
 
-      if (seenUsers.has(userKey)) return false;
-      seenUsers.add(userKey);
-      return true;
-    });
-  }, [currentUserId, remoteParticipants]);
+      const mediaState =
+        remoteMedia[participantId] || {};
 
-  const displayedParticipants = useMemo(() => {
-    const participants = new Map();
-    participants.set(String(currentUserId || "local"), currentUsername);
+      const hasLiveVideoTrack =
+        participantStream
+          ?.getVideoTracks()
+          .some(
+            (track) =>
+              track.readyState === "live" &&
+              track.enabled,
+          );
 
-    (room?.participants || []).forEach((participant) => {
-      participants.set(
-        String(participant.user_id || participant.username),
-        participant.username,
-      );
-    });
+      participantsMap.set(participantId, {
+        id: participantId,
+        user_id: participantId,
+        username: "Участник",
+        isLocal: false,
+        stream: participantStream,
+        isSharing: Boolean(
+          mediaState.is_screen_sharing,
+        ),
+        hasVideo:
+          Boolean(mediaState.is_screen_sharing) ||
+          (!mediaState.is_video_off &&
+            hasLiveVideoTrack),
+        isMuted: Boolean(mediaState.is_muted),
+      });
+    }
 
-    visibleRemoteParticipants.forEach((participant) => {
-      participants.set(
-        String(participant.userId || participant.peerId),
-        participant.username || "Участник",
-      );
-    });
+    return Array.from(participantsMap.values());
+  }, [
+    cameraEnabled,
+    cameraStream,
+    microphoneEnabled,
+    remoteMedia,
+    remoteStreams,
+    roomParticipants,
+    screenStream,
+    user,
+  ]);
 
-    return Array.from(participants.entries()).map(([id, name]) => ({ id, name }));
-  }, [currentUserId, currentUsername, room, visibleRemoteParticipants]);
 
-  const videoParticipants = [
-    {
-      peerId: "local",
-      userId: currentUserId,
-      username: currentUsername,
-      stream: localPreview,
-      isMuted: !micEnabled,
-      isVideoOff: !cameraEnabled && !isSharing,
-      isScreenSharing: isSharing,
-      isLocal: true,
-    },
-    ...visibleRemoteParticipants.map((participant) => ({
-      ...participant,
-      isLocal: false,
-    })),
-  ];
-
-  const screenSharingParticipants = videoParticipants.filter(
-    (participant) => participant.isScreenSharing,
-  );
-  const regularVideoParticipants = videoParticipants.filter(
-    (participant) => !participant.isScreenSharing,
-  );
-  const hasScreenShares = screenSharingParticipants.length > 0;
-
-  const totalVideoTiles = videoParticipants.length;
-  const gridLayoutClass =
-    totalVideoTiles === 1
-      ? styles.singleVideo
-      : totalVideoTiles === 2
-        ? styles.twoVideos
-        : totalVideoTiles === 3
-          ? styles.threeVideos
-          : totalVideoTiles === 4
-            ? styles.fourVideos
-            : totalVideoTiles <= 6
-              ? styles.sixVideos
-              : styles.manyVideos;
-
-  const presentationGridClass =
-    screenSharingParticipants.length === 1
-      ? styles.onePresentation
-      : screenSharingParticipants.length === 2
-        ? styles.twoPresentations
-        : screenSharingParticipants.length <= 4
-          ? styles.fourPresentations
-          : styles.manyPresentations;
-
-  const regularPreviewLimit =
-    screenSharingParticipants.length === 1 ? 4 : 6;
-  const visibleRegularPreviews = regularVideoParticipants.slice(
-    0,
-    regularPreviewLimit,
-  );
-  const hiddenRegularCount = Math.max(
-    0,
-    regularVideoParticipants.length - visibleRegularPreviews.length,
-  );
-  const railItemsCount =
-    visibleRegularPreviews.length + (hiddenRegularCount > 0 ? 1 : 0);
-
-  const renderParticipantTile = (
-    participant,
-    { presentation = false, compact = false } = {},
-  ) => (
-    <VideoTile
-      key={participant.peerId}
-      stream={participant.stream}
-      name={participant.username}
-      videoMuted={participant.isLocal}
-      isMicOff={participant.isMuted}
-      videoOff={participant.isVideoOff}
-      isLocal={participant.isLocal}
-      mirror={participant.isLocal && !participant.isScreenSharing}
-      isPresentation={presentation}
-      compact={compact}
-    />
+  const sharingParticipants = useMemo(
+    () =>
+      conferenceParticipants.filter(
+        (participant) => participant.isSharing,
+      ),
+    [conferenceParticipants],
   );
 
-  if (pageLoading || authLoading) {
+  const cameraParticipants = useMemo(
+    () =>
+      conferenceParticipants.filter(
+        (participant) =>
+          !participant.isSharing &&
+          participant.hasVideo,
+      ),
+    [conferenceParticipants],
+  );
+
+  const mainParticipants =
+    sharingParticipants.length > 0
+      ? sharingParticipants
+      : cameraParticipants;
+
+  const sidebarParticipants =
+    sharingParticipants.length > 0
+      ? conferenceParticipants.filter(
+          (participant) =>
+            !participant.isSharing,
+        )
+      : conferenceParticipants.filter(
+          (participant) =>
+            !participant.hasVideo,
+        );
+
+
+  if (isConnecting || authLoading) {
     return (
-      <main className={styles.loadingPage}>
-        <span className={styles.loader} />
+      <main className={styles.statePage}>
+        <div className={styles.loader} />
         <p>Подключаемся к конференции…</p>
       </main>
     );
   }
 
-  if (error && !room) {
+
+  if (error) {
     return (
-      <main className={styles.errorPage}>
-        <a href="/" className={styles.brand}>TalkSphere</a>
-        <section>
-          <h1>Не удалось открыть конференцию</h1>
-          <p>{error}</p>
-          <button type="button" onClick={() => navigate("/meetings")}>
-            Вернуться ко встречам
-          </button>
-        </section>
+      <main className={styles.statePage}>
+        <h1>Не удалось открыть конференцию</h1>
+        <p>{error}</p>
+
+        <button
+          type="button"
+          onClick={() => navigate("/meetings")}
+        >
+          Вернуться к встречам
+        </button>
       </main>
     );
   }
 
+
+  const mainGridClass = [
+    styles.mainGrid,
+    mainParticipants.length === 1
+      ? styles.oneTile
+      : "",
+    mainParticipants.length === 2
+      ? styles.twoTiles
+      : "",
+    mainParticipants.length > 2
+      ? styles.manyTiles
+      : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+
   return (
-    <div className={styles.page}>
-      <header className={styles.topbar}>
-        <button type="button" className={styles.brand} onClick={() => navigate("/")}>
+    <main className={styles.conferencePage}>
+      <header className={styles.conferenceHeader}>
+        <button
+          type="button"
+          className={styles.brand}
+          onClick={() => navigate("/")}
+        >
           TalkSphere
         </button>
 
-        <div className={styles.roomInfo}>
-          <strong>{room?.title || "Конференция"}</strong>
-          <span>Код: {inviteCode}</span>
-        </div>
+        <div className={styles.roomInformation}>
+          <strong>
+            {room?.title || "Конференция"}
+          </strong>
 
-        <div className={`${styles.connection} ${styles[connectionState]}`}>
-          <span />
-          {connectionState === "connected" ? "В эфире" : "Подключение"}
+          <span>Код: {inviteCode}</span>
         </div>
       </header>
 
-      <main
-        className={`${styles.conference} ${
-          hasScreenShares ? styles.conferenceSharing : ""
+      <section
+        className={`${styles.conferenceWorkspace} ${
+          sidebarParticipants.length === 0
+            ? styles.withoutSidebar
+            : ""
         }`}
       >
-        {error && <div className={styles.toast}>{error}</div>}
-        {copied && <div className={styles.toast}>Ссылка скопирована</div>}
-
-        {hasScreenShares ? (
-          <section
-            className={`${styles.presentationLayout} ${
-              screenSharingParticipants.length === 1
-                ? styles.singleShareLayout
-                : styles.multipleShareLayout
-            } ${railItemsCount === 0 ? styles.presentationOnly : ""}`}
-          >
-            <div
-              className={`${styles.presentationStage} ${presentationGridClass}`}
-            >
-              {screenSharingParticipants.map((participant) =>
-                renderParticipantTile(participant, { presentation: true }),
+        <div className={styles.mainStage}>
+          {mainParticipants.length > 0 ? (
+            <div className={mainGridClass}>
+              {mainParticipants.map(
+                (participant) => (
+                  <ParticipantTile
+                    key={participant.id}
+                    participant={participant}
+                  />
+                ),
               )}
             </div>
+          ) : (
+            <div className={styles.emptyStage}>
+              <span>Камеры участников выключены</span>
+            </div>
+          )}
+        </div>
 
-            {railItemsCount > 0 && (
-              <aside
-                className={styles.participantRail}
-                style={{ "--rail-items": railItemsCount }}
-                aria-label="Участники без демонстрации экрана"
-              >
-                {visibleRegularPreviews.map((participant) =>
-                  renderParticipantTile(participant, { compact: true }),
-                )}
-
-                {hiddenRegularCount > 0 && (
-                  <div className={styles.collapsedParticipants}>
-                    <strong>+{hiddenRegularCount}</strong>
-                    <span>ещё участников</span>
-                  </div>
-                )}
-              </aside>
+        {sidebarParticipants.length > 0 && (
+          <aside className={styles.sidebar}>
+            {sidebarParticipants.map(
+              (participant) => (
+                <ParticipantTile
+                  key={participant.id}
+                  participant={participant}
+                  compact
+                />
+              ),
             )}
-          </section>
-        ) : (
-          <section className={`${styles.videoGrid} ${gridLayoutClass}`}>
-            {videoParticipants.map((participant) =>
-              renderParticipantTile(participant),
-            )}
-          </section>
+          </aside>
         )}
+      </section>
 
-        <aside className={`${styles.participantsPanel} ${participantsOpen ? styles.panelOpen : ""}`}>
-          <div className={styles.panelHeader}>
-            <h2>Участники ({displayedParticipants.length})</h2>
-            <button
-              type="button"
-              onClick={() => setParticipantsOpen(false)}
-              aria-label="Закрыть список участников"
-            >
-              ×
-            </button>
-          </div>
-
-          <ul>
-            {displayedParticipants.map((participant, index) => (
-              <li key={participant.id}>
-                <span>{participant.name.slice(0, 1).toUpperCase()}</span>
-                {participant.name}
-                {index === 0 && <small>Вы</small>}
-              </li>
-            ))}
-          </ul>
-        </aside>
-      </main>
-
-      <footer className={styles.controlsBar}>
+      <footer className={styles.controls}>
         <button
           type="button"
-          className={!micEnabled ? styles.controlOff : ""}
+          className={`${styles.controlButton} ${
+            !microphoneEnabled
+              ? styles.disabledControl
+              : ""
+          }`}
           onClick={toggleMicrophone}
-          aria-label={micEnabled ? "Выключить микрофон" : "Включить микрофон"}
+          title={
+            microphoneEnabled
+              ? "Выключить микрофон"
+              : "Включить микрофон"
+          }
         >
-          <MicIcon off={!micEnabled} />
-          <span>{micEnabled ? "Микрофон" : "Без звука"}</span>
+          <MicrophoneIcon
+            disabled={!microphoneEnabled}
+          />
         </button>
 
         <button
           type="button"
-          className={!cameraEnabled ? styles.controlOff : ""}
+          className={`${styles.controlButton} ${
+            !cameraEnabled
+              ? styles.disabledControl
+              : ""
+          }`}
           onClick={toggleCamera}
-          disabled={isSharing}
-          aria-label={cameraEnabled ? "Выключить камеру" : "Включить камеру"}
+          title={
+            cameraEnabled
+              ? "Выключить камеру"
+              : "Включить камеру"
+          }
         >
-          <CameraIcon off={!cameraEnabled} />
-          <span>{cameraEnabled ? "Камера" : "Без видео"}</span>
+          <VideoIcon disabled={!cameraEnabled} />
         </button>
 
         <button
           type="button"
-          className={isSharing ? styles.controlActive : ""}
-          onClick={toggleScreenShare}
-          aria-label="Демонстрация экрана"
+          className={`${styles.controlButton} ${
+            screenStream ? styles.activeControl : ""
+          }`}
+          onClick={toggleScreenSharing}
+          title="Демонстрация экрана"
         >
           <ScreenIcon />
-          <span>{isSharing ? "Остановить показ" : "Показать экран"}</span>
-        </button>
-
-        <button type="button" onClick={copyMeetingLink} aria-label="Скопировать ссылку">
-          <CopyIcon />
-          <span>Ссылка</span>
         </button>
 
         <button
           type="button"
-          onClick={() => setParticipantsOpen((value) => !value)}
-          aria-label="Участники"
+          className={styles.controlButton}
+          onClick={copyInviteLink}
+          title="Скопировать ссылку"
         >
-          <PeopleIcon />
-          <span>Участники</span>
+          <LinkIcon />
         </button>
 
         <button
           type="button"
-          className={styles.hangup}
+          className={styles.leaveButton}
           onClick={leaveConference}
-          aria-label="Выйти из конференции"
+          title="Выйти"
         >
-          <HangupIcon />
-          <span>Выйти</span>
+          <PhoneIcon />
         </button>
+
+        {copied && (
+          <span className={styles.copyMessage}>
+            Ссылка скопирована
+          </span>
+        )}
       </footer>
-    </div>
+    </main>
   );
 }
+
 
 export default Conference;
