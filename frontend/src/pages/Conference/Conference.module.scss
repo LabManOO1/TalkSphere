@@ -22,7 +22,7 @@
 .brand {
   justify-self: start;
   border: 0;
-  background: radial-gradient(circle, $black-color 0%, $primary-color 100%);
+  background: radial-gradient(circle at center, $primary-color 0%, #a40000 34%, $black-color 100%);
   background-clip: text;
   color: transparent;
   font-family: "Manrope", sans-serif;
@@ -99,6 +99,105 @@
   gap: 14px;
 }
 
+.conferenceSharing {
+  overflow: hidden;
+}
+
+.presentationLayout {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  gap: 14px;
+  overflow: hidden;
+}
+
+.singleShareLayout {
+  grid-template-columns: minmax(0, 1fr) clamp(210px, 20vw, 285px);
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.multipleShareLayout {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) clamp(120px, 21vh, 175px);
+}
+
+.presentationOnly {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.presentationStage {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  gap: 12px;
+  overflow: hidden;
+}
+
+.onePresentation {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.twoPresentations {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.fourPresentations {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+
+.manyPresentations {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+
+.participantRail {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  gap: 10px;
+  overflow: hidden;
+}
+
+.singleShareLayout .participantRail {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: repeat(var(--rail-items), minmax(0, 1fr));
+}
+
+.multipleShareLayout .participantRail {
+  grid-template-columns: repeat(var(--rail-items), minmax(0, 1fr));
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.collapsedParticipants {
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 16px;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 3px;
+  background:
+    radial-gradient(circle at center, rgba(164, 0, 0, 0.38), transparent 65%),
+    #242424;
+  text-align: center;
+
+  strong {
+    font-size: clamp(22px, 3vw, 38px);
+  }
+
+  span {
+    color: #bbb;
+    font-size: 11px;
+  }
+}
+
 .singleVideo {
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
@@ -157,6 +256,57 @@
   height: auto;
   max-height: 100%;
   aspect-ratio: 16 / 9;
+}
+
+.presentationTile {
+  width: 100%;
+  height: 100%;
+  border-radius: 18px;
+  background: #080808;
+
+  video {
+    object-fit: contain;
+  }
+
+  .avatar {
+    width: clamp(96px, 12vw, 168px);
+    height: clamp(96px, 12vw, 168px);
+  }
+}
+
+.compactTile {
+  width: 100%;
+  height: 100%;
+  border-radius: 15px;
+
+  .avatar {
+    width: clamp(42px, 5vw, 70px);
+    height: clamp(42px, 5vw, 70px);
+    font-size: clamp(18px, 2.4vw, 28px);
+  }
+
+  .tileFooter {
+    right: 7px;
+    bottom: 7px;
+    left: 7px;
+  }
+
+  .participantName {
+    max-width: calc(100% - 48px);
+    padding: 5px 7px;
+    border-radius: 8px;
+    font-size: 10px;
+  }
+
+  .mediaBadges {
+    gap: 3px;
+
+    svg {
+      width: 24px;
+      height: 24px;
+      padding: 5px;
+    }
+  }
 }
 
 .mirroredVideo {
@@ -456,6 +606,24 @@
   to { transform: rotate(360deg); }
 }
 
+@media (max-width: 920px) {
+  .singleShareLayout,
+  .multipleShareLayout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) clamp(105px, 19vh, 145px);
+  }
+
+  .presentationOnly {
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .singleShareLayout .participantRail,
+  .multipleShareLayout .participantRail {
+    grid-template-columns: repeat(var(--rail-items), minmax(0, 1fr));
+    grid-template-rows: minmax(0, 1fr);
+  }
+}
+
 @media (max-width: 760px) {
   .page {
     grid-template-rows: 64px minmax(0, 1fr) 92px;
@@ -490,6 +658,41 @@
   .conference {
     padding: 10px;
     overflow-y: auto;
+  }
+
+  .conferenceSharing {
+    overflow: hidden;
+  }
+
+  .presentationLayout {
+    height: 100%;
+    min-height: 0;
+    gap: 8px;
+  }
+
+  .presentationStage {
+    gap: 8px;
+  }
+
+  .twoPresentations {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .fourPresentations,
+  .manyPresentations {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: repeat(2, minmax(0, 1fr));
+  }
+
+  .participantRail {
+    gap: 7px;
+  }
+
+  .presentationTile,
+  .compactTile,
+  .collapsedParticipants {
+    border-radius: 12px;
   }
 
   .videoGrid,

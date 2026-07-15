@@ -21,7 +21,7 @@ class RoomParticipant(Base):
     joined_at = Column(DateTime, server_default=func.now())
     left_at = Column(DateTime, nullable=True)
 
-    is_muted = Column(Boolean, default=False)
-    is_video_off = Column(Boolean, default=False)
+    is_muted = Column(Boolean, default=True)
+    is_video_off = Column(Boolean, default=True)
     is_screen_sharing = Column(Boolean, default=False)
     role = Column(SQLEnum(ParticipantRole), default=ParticipantRole.speaker)

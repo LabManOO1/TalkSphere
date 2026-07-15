@@ -113,6 +113,8 @@ function VideoTile({
   videoOff = false,
   isLocal = false,
   mirror = false,
+  isPresentation = false,
+  compact = false,
 }) {
   const videoRef = useRef(null);
 
@@ -130,7 +132,11 @@ function VideoTile({
     .join("");
 
   return (
-    <article className={styles.videoTile}>
+    <article
+      className={`${styles.videoTile} ${
+        isPresentation ? styles.presentationTile : ""
+      } ${compact ? styles.compactTile : ""}`}
+    >
       <video
         ref={videoRef}
         autoPlay
@@ -1028,7 +1034,32 @@ function Conference() {
     return Array.from(participants.entries()).map(([id, name]) => ({ id, name }));
   }, [currentUserId, currentUsername, room, visibleRemoteParticipants]);
 
-  const totalVideoTiles = visibleRemoteParticipants.length + 1;
+  const videoParticipants = [
+    {
+      peerId: "local",
+      userId: currentUserId,
+      username: currentUsername,
+      stream: localPreview,
+      isMuted: !micEnabled,
+      isVideoOff: !cameraEnabled && !isSharing,
+      isScreenSharing: isSharing,
+      isLocal: true,
+    },
+    ...visibleRemoteParticipants.map((participant) => ({
+      ...participant,
+      isLocal: false,
+    })),
+  ];
+
+  const screenSharingParticipants = videoParticipants.filter(
+    (participant) => participant.isScreenSharing,
+  );
+  const regularVideoParticipants = videoParticipants.filter(
+    (participant) => !participant.isScreenSharing,
+  );
+  const hasScreenShares = screenSharingParticipants.length > 0;
+
+  const totalVideoTiles = videoParticipants.length;
   const gridLayoutClass =
     totalVideoTiles === 1
       ? styles.singleVideo
@@ -1041,6 +1072,46 @@ function Conference() {
             : totalVideoTiles <= 6
               ? styles.sixVideos
               : styles.manyVideos;
+
+  const presentationGridClass =
+    screenSharingParticipants.length === 1
+      ? styles.onePresentation
+      : screenSharingParticipants.length === 2
+        ? styles.twoPresentations
+        : screenSharingParticipants.length <= 4
+          ? styles.fourPresentations
+          : styles.manyPresentations;
+
+  const regularPreviewLimit =
+    screenSharingParticipants.length === 1 ? 4 : 6;
+  const visibleRegularPreviews = regularVideoParticipants.slice(
+    0,
+    regularPreviewLimit,
+  );
+  const hiddenRegularCount = Math.max(
+    0,
+    regularVideoParticipants.length - visibleRegularPreviews.length,
+  );
+  const railItemsCount =
+    visibleRegularPreviews.length + (hiddenRegularCount > 0 ? 1 : 0);
+
+  const renderParticipantTile = (
+    participant,
+    { presentation = false, compact = false } = {},
+  ) => (
+    <VideoTile
+      key={participant.peerId}
+      stream={participant.stream}
+      name={participant.username}
+      videoMuted={participant.isLocal}
+      isMicOff={participant.isMuted}
+      videoOff={participant.isVideoOff}
+      isLocal={participant.isLocal}
+      mirror={participant.isLocal && !participant.isScreenSharing}
+      isPresentation={presentation}
+      compact={compact}
+    />
+  );
 
   if (pageLoading || authLoading) {
     return (
@@ -1084,33 +1155,56 @@ function Conference() {
         </div>
       </header>
 
-      <main className={styles.conference}>
+      <main
+        className={`${styles.conference} ${
+          hasScreenShares ? styles.conferenceSharing : ""
+        }`}
+      >
         {error && <div className={styles.toast}>{error}</div>}
         {copied && <div className={styles.toast}>Ссылка скопирована</div>}
 
-        <section
-          className={`${styles.videoGrid} ${gridLayoutClass}`}
-        >
-          <VideoTile
-            stream={localPreview}
-            name={currentUsername}
-            videoMuted
-            isMicOff={!micEnabled}
-            videoOff={!cameraEnabled && !isSharing}
-            isLocal
-            mirror={!isSharing}
-          />
+        {hasScreenShares ? (
+          <section
+            className={`${styles.presentationLayout} ${
+              screenSharingParticipants.length === 1
+                ? styles.singleShareLayout
+                : styles.multipleShareLayout
+            } ${railItemsCount === 0 ? styles.presentationOnly : ""}`}
+          >
+            <div
+              className={`${styles.presentationStage} ${presentationGridClass}`}
+            >
+              {screenSharingParticipants.map((participant) =>
+                renderParticipantTile(participant, { presentation: true }),
+              )}
+            </div>
 
-          {visibleRemoteParticipants.map((participant) => (
-            <VideoTile
-              key={participant.peerId}
-              stream={participant.stream}
-              name={participant.username}
-              isMicOff={participant.isMuted}
-              videoOff={participant.isVideoOff}
-            />
-          ))}
-        </section>
+            {railItemsCount > 0 && (
+              <aside
+                className={styles.participantRail}
+                style={{ "--rail-items": railItemsCount }}
+                aria-label="Участники без демонстрации экрана"
+              >
+                {visibleRegularPreviews.map((participant) =>
+                  renderParticipantTile(participant, { compact: true }),
+                )}
+
+                {hiddenRegularCount > 0 && (
+                  <div className={styles.collapsedParticipants}>
+                    <strong>+{hiddenRegularCount}</strong>
+                    <span>ещё участников</span>
+                  </div>
+                )}
+              </aside>
+            )}
+          </section>
+        ) : (
+          <section className={`${styles.videoGrid} ${gridLayoutClass}`}>
+            {videoParticipants.map((participant) =>
+              renderParticipantTile(participant),
+            )}
+          </section>
+        )}
 
         <aside className={`${styles.participantsPanel} ${participantsOpen ? styles.panelOpen : ""}`}>
           <div className={styles.panelHeader}>
