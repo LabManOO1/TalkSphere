@@ -1,0 +1,151 @@
+@use "../../assets/styles/variables" as *;
+
+.page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #ffffff;
+  padding: 24px;
+}
+
+.container {
+  width: 500px;
+  max-width: 100%;
+  padding: 0 20px;
+}
+
+.logo {
+  display: block;
+  font-family: "Manrope", sans-serif;
+  font-size: 28px;
+  font-weight: 700;
+  color: $black-color;
+  text-decoration: none;
+  margin-bottom: 20px;
+  text-align: center;
+}
+
+.tabs {
+  display: flex;
+  justify-content: center;
+  gap: 0;
+  margin-bottom: 32px;
+  border-bottom: 2px solid #e5e7eb;
+}
+
+.tab {
+  font-family: "Steelfish", "Manrope", sans-serif;
+  font-size: 48px;
+  font-weight: 800;
+  color: rgba(0, 0, 0, 0.5);
+  text-decoration: none;
+  padding: 0 20px 8px;
+  border-bottom: 3px solid transparent;
+  transition: color 0.3s, border-color 0.3s;
+}
+
+.tab.active {
+  color: $black-color;
+  border-bottom-color: #a10005;
+}
+
+.tab:hover {
+  color: $black-color;
+}
+
+.title {
+  font-family: "Manrope", sans-serif;
+  font-size: 38px;
+  font-weight: 800;
+  color: $black-color;
+  text-align: center;
+  margin-bottom: 32px;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.label {
+  font-family: "Manrope", sans-serif;
+  font-size: 16px;
+  font-weight: 500;
+  color: rgba(0, 0, 0, 0.6);
+}
+
+.input {
+  padding: 10px 16px;
+  border: 2px solid #a10005;
+  border-radius: 25px;
+  font-family: "Manrope", sans-serif;
+  font-size: 16px;
+  font-weight: 500;
+  color: $black-color;
+  outline: none;
+  background: #f6f6f6;
+  transition: border-color 0.3s;
+
+  &:focus {
+    border-color: #a10005;
+    background: #ffffff;
+  }
+
+  &::placeholder {
+    color: #a0aec0;
+    font-weight: 400;
+  }
+}
+
+.error {
+  color: #ef4444;
+  font-family: "Manrope", sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  margin-top: -8px;
+}
+
+.button {
+  padding: 14px;
+  background: linear-gradient(180deg, #a10005, #3b0001);
+  color: #ffffff;
+  border: none;
+  border-radius: 25px;
+  font-family: "Steelfish", "Manrope", sans-serif;
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  transition: opacity 0.3s, transform 0.15s;
+  margin-top: 8px;
+
+  &:hover {
+    opacity: 0.9;
+  }
+
+  &:active {
+    transform: scale(0.98);
+  }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+}
+
+.copyright {
+  font-family: "Manrope", sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  color: rgba(0, 0, 0, 0.5);
+  margin-top: 32px;
+  text-align: center;
+}
