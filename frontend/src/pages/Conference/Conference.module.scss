@@ -1,12 +1,23 @@
 @use "../../assets/styles/variables" as *;
 
 .page {
-  min-height: 100dvh;
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100dvh;
+  min-width: 0;
+  min-height: 0;
   display: grid;
   grid-template-rows: 76px minmax(0, 1fr) 104px;
   overflow: hidden;
+  overscroll-behavior: none;
   background: #111;
   color: $white-color;
+}
+
+.page,
+.page * {
+  box-sizing: border-box;
 }
 
 .topbar {
@@ -87,9 +98,13 @@
 
 .conference {
   position: relative;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   min-height: 0;
-  padding: 20px;
+  padding: 14px;
   overflow: hidden;
+  contain: layout paint;
 }
 
 .videoGrid {
@@ -105,22 +120,21 @@
 
 .presentationLayout {
   width: 100%;
+  max-width: 100%;
   height: 100%;
   min-width: 0;
   min-height: 0;
   display: grid;
-  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) clamp(112px, 10vw, 156px);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 12px;
   overflow: hidden;
 }
 
-.singleShareLayout {
-  grid-template-columns: minmax(0, 1fr) clamp(210px, 20vw, 285px);
-  grid-template-rows: minmax(0, 1fr);
-}
-
+.singleShareLayout,
 .multipleShareLayout {
-  grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr) clamp(120px, 21vh, 175px);
+  grid-template-columns: minmax(0, 1fr) clamp(112px, 10vw, 156px);
+  grid-template-rows: minmax(0, 1fr);
 }
 
 .presentationOnly {
@@ -129,10 +143,14 @@
 }
 
 .presentationStage {
+  width: 100%;
+  max-width: 100%;
+  height: 100%;
+  max-height: 100%;
   min-width: 0;
   min-height: 0;
   display: grid;
-  gap: 12px;
+  gap: 10px;
   overflow: hidden;
 }
 
@@ -157,26 +175,33 @@
 }
 
 .participantRail {
+  width: 100%;
   min-width: 0;
   min-height: 0;
-  display: grid;
-  gap: 10px;
-  overflow: hidden;
+  padding-right: 2px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 9px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
 }
 
-.singleShareLayout .participantRail {
-  grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: repeat(var(--rail-items), minmax(0, 1fr));
-}
-
+.singleShareLayout .participantRail,
 .multipleShareLayout .participantRail {
-  grid-template-columns: repeat(var(--rail-items), minmax(0, 1fr));
-  grid-template-rows: minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
 }
 
 .collapsedParticipants {
+  width: 100%;
+  height: auto;
   min-width: 0;
   min-height: 0;
+  flex: 0 0 auto;
+  aspect-ratio: 1 / 1;
   border: 1px solid rgba(255, 255, 255, 0.09);
   border-radius: 16px;
   display: grid;
@@ -201,7 +226,7 @@
 .singleVideo {
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
-  place-items: center;
+  place-items: stretch;
 }
 
 .twoVideos {
@@ -244,7 +269,11 @@
 
   video {
     width: 100%;
+    max-width: 100%;
     height: 100%;
+    max-height: 100%;
+    min-width: 0;
+    min-height: 0;
     display: block;
     background: #111;
     object-fit: cover;
@@ -252,19 +281,28 @@
 }
 
 .singleVideo .videoTile {
-  width: min(100%, 1120px);
-  height: auto;
-  max-height: 100%;
-  aspect-ratio: 16 / 9;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  aspect-ratio: auto;
 }
 
 .presentationTile {
   width: 100%;
+  max-width: 100%;
   height: 100%;
-  border-radius: 18px;
+  max-height: 100%;
+  min-width: 0;
+  min-height: 0;
+  border-radius: 16px;
   background: #080808;
 
   video {
+    width: 100%;
+    max-width: 100%;
+    height: 100%;
+    max-height: 100%;
     object-fit: contain;
   }
 
@@ -276,35 +314,42 @@
 
 .compactTile {
   width: 100%;
-  height: 100%;
-  border-radius: 15px;
+  height: auto;
+  min-height: 0;
+  flex: 0 0 auto;
+  aspect-ratio: 1 / 1;
+  border-radius: 14px;
+
+  video {
+    object-fit: cover;
+  }
 
   .avatar {
-    width: clamp(42px, 5vw, 70px);
-    height: clamp(42px, 5vw, 70px);
-    font-size: clamp(18px, 2.4vw, 28px);
+    width: clamp(42px, 4.4vw, 62px);
+    height: clamp(42px, 4.4vw, 62px);
+    font-size: clamp(18px, 2vw, 26px);
   }
 
   .tileFooter {
-    right: 7px;
-    bottom: 7px;
-    left: 7px;
+    right: 6px;
+    bottom: 6px;
+    left: 6px;
   }
 
   .participantName {
-    max-width: calc(100% - 48px);
-    padding: 5px 7px;
-    border-radius: 8px;
-    font-size: 10px;
+    max-width: calc(100% - 38px);
+    padding: 4px 6px;
+    border-radius: 7px;
+    font-size: 9px;
   }
 
   .mediaBadges {
-    gap: 3px;
+    gap: 2px;
 
     svg {
-      width: 24px;
-      height: 24px;
-      padding: 5px;
+      width: 21px;
+      height: 21px;
+      padding: 4px;
     }
   }
 }
@@ -471,6 +516,9 @@
 
 .controlsBar {
   z-index: 20;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
   padding: 14px 22px 18px;
   display: flex;
   align-items: center;
@@ -607,47 +655,48 @@
 }
 
 @media (max-width: 920px) {
+  .presentationLayout,
   .singleShareLayout,
   .multipleShareLayout {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr) clamp(105px, 19vh, 145px);
+    grid-template-columns: minmax(0, 1fr) 104px;
+    grid-template-rows: minmax(0, 1fr);
+    gap: 8px;
   }
 
   .presentationOnly {
-    grid-template-rows: minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
   }
 
-  .singleShareLayout .participantRail,
-  .multipleShareLayout .participantRail {
-    grid-template-columns: repeat(var(--rail-items), minmax(0, 1fr));
-    grid-template-rows: minmax(0, 1fr);
+  .participantRail {
+    gap: 7px;
   }
 }
 
 @media (max-width: 760px) {
   .page {
-    grid-template-rows: 64px minmax(0, 1fr) 92px;
+    grid-template-rows: 64px minmax(0, 1fr) 84px;
   }
 
   .topbar {
-    padding: 0 15px;
-    grid-template-columns: auto 1fr auto;
+    padding: 0 12px;
+    grid-template-columns: auto minmax(0, 1fr) auto;
   }
 
   .brand {
-    font-size: 19px;
+    font-size: 18px;
   }
 
   .roomInfo {
-    padding: 0 10px;
+    min-width: 0;
+    padding: 0 8px;
 
     strong {
-      max-width: 38vw;
-      font-size: 13px;
+      max-width: 34vw;
+      font-size: 12px;
     }
 
     span {
-      font-size: 10px;
+      font-size: 9px;
     }
   }
 
@@ -656,88 +705,86 @@
   }
 
   .conference {
-    padding: 10px;
-    overflow-y: auto;
-  }
-
-  .conferenceSharing {
+    padding: 8px;
     overflow: hidden;
   }
 
-  .presentationLayout {
-    height: 100%;
-    min-height: 0;
-    gap: 8px;
+  .presentationLayout,
+  .singleShareLayout,
+  .multipleShareLayout {
+    grid-template-columns: minmax(0, 1fr) 84px;
+    grid-template-rows: minmax(0, 1fr);
+    gap: 7px;
+  }
+
+  .presentationOnly {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .presentationStage {
-    gap: 8px;
+    gap: 7px;
   }
 
-  .twoPresentations {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    grid-template-rows: minmax(0, 1fr);
-  }
-
+  .twoPresentations,
   .fourPresentations,
   .manyPresentations {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    grid-template-rows: repeat(2, minmax(0, 1fr));
+    grid-auto-rows: minmax(0, 1fr);
   }
 
   .participantRail {
-    gap: 7px;
+    gap: 6px;
   }
 
   .presentationTile,
   .compactTile,
   .collapsedParticipants {
-    border-radius: 12px;
+    border-radius: 10px;
   }
 
-  .videoGrid,
+  .videoGrid {
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+  }
+
   .twoVideos,
   .threeVideos,
   .fourVideos,
   .sixVideos,
   .manyVideos {
-    height: auto;
-    min-height: 100%;
-    grid-template-columns: 1fr;
-    grid-template-rows: none;
-    grid-auto-rows: minmax(230px, 48vh);
-    gap: 10px;
-    overflow-y: visible;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-auto-rows: minmax(0, 1fr);
+    gap: 8px;
+    overflow: hidden;
   }
 
-  .singleVideo {
-    height: 100%;
-    min-height: 0;
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr);
-  }
-
+  .singleVideo,
   .singleVideo .videoTile {
-    max-height: none;
-    aspect-ratio: auto;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
   }
 
   .videoTile {
-    border-radius: 17px;
+    border-radius: 14px;
   }
 
   .controlsBar {
-    padding: 9px 6px 12px;
+    padding: 7px 4px 9px;
     justify-content: space-around;
-    gap: 1px;
+    gap: 0;
 
     button {
-      min-width: 51px;
-      padding: 7px 4px;
+      min-width: 47px;
+      padding: 6px 3px;
 
       svg {
-        width: 25px;
-        height: 25px;
+        width: 24px;
+        height: 24px;
       }
 
       span {
@@ -751,8 +798,19 @@
   }
 }
 
-@media (max-width: 420px) {
+@media (max-width: 430px) {
+  .presentationLayout,
+  .singleShareLayout,
+  .multipleShareLayout {
+    grid-template-columns: minmax(0, 1fr) 72px;
+    gap: 5px;
+  }
+
+  .participantRail {
+    gap: 5px;
+  }
+
   .controlsBar button {
-    min-width: 45px;
+    min-width: 43px;
   }
 }
