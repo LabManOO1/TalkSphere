@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from ..websocket.signal import rooms as ws_rooms
 import random
 import string
+import json
 
 rooms_router = APIRouter(prefix="/rooms", tags=["Rooms"])
 
@@ -177,4 +178,69 @@ async def leave_room(
         "message": f"Вы вышли из комнаты {invite_code}",
         "room_id": str(room.id),
         "room_status": room.status.value
+    }
+
+
+class UpdateParticipantStatusRequest(BaseModel):
+    is_muted: Optional[bool] = None
+    is_video_off: Optional[bool] = None
+    is_screen_sharing: Optional[bool] = None
+
+
+@rooms_router.patch("/{invite_code}/participants/status", summary="Обновление статуса участника")
+async def update_participant_status(
+        invite_code: str,
+        request: UpdateParticipantStatusRequest,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    room = db.query(Room).filter(Room.invite_code == invite_code).first()
+    if not room:
+        raise HTTPException(status_code=404, detail="Комната не найдена")
+
+    if room.status != RoomStatus.active:
+        raise HTTPException(status_code=400, detail="Комната не активна")
+
+    participant = db.query(RoomParticipant).filter(
+        RoomParticipant.room_id == room.id,
+        RoomParticipant.user_id == current_user.id,
+        RoomParticipant.left_at.is_(None)
+    ).first()
+
+    if not participant:
+        raise HTTPException(status_code=404, detail="Пользователь не находится в этой комнате")
+
+    if request.is_muted is not None:
+        participant.is_muted = request.is_muted
+    if request.is_video_off is not None:
+        participant.is_video_off = request.is_video_off
+    if request.is_screen_sharing is not None:
+        participant.is_screen_sharing = request.is_screen_sharing
+
+    db.commit()
+
+    if invite_code in ws_rooms:
+        status_update = {
+            "type": "status_update",
+            "user_id": str(current_user.id),
+            "username": current_user.username,
+            "is_muted": participant.is_muted,
+            "is_video_off": participant.is_video_off,
+            "is_screen_sharing": participant.is_screen_sharing
+        }
+
+        for ws_info in ws_rooms[invite_code]:
+            if ws_info["user_id"] != current_user.id:
+                try:
+                    await ws_info["ws"].send_text(json.dumps(status_update))
+                except Exception as e:
+                    print(f"Ошибка отправки статуса: {e}")
+
+    return {
+        "message": "Статус участника обновлён",
+        "status": {
+            "is_muted": participant.is_muted,
+            "is_video_off": participant.is_video_off,
+            "is_screen_sharing": participant.is_screen_sharing
+        }
     }
