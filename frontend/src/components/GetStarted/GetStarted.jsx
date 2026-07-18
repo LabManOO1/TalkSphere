@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import styles from "./GetStarted.module.scss";
 
 const steps = [
@@ -36,7 +37,9 @@ function GetStarted() {
           Создайте аккаунт и проведите первую встречу через 5 минут
         </h3>
 
-        <button className={styles.cta}>Попробовать бесплатно</button>
+        <Link to="/register" className={styles.cta}>
+          Попробовать бесплатно
+        </Link>
 
         <p className={styles.footNote}>
           Начните использовать TalkSphere уже сегодня!

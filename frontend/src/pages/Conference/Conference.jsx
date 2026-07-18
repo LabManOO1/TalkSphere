@@ -195,6 +195,8 @@ function Conference() {
   const [isSharing, setIsSharing] = useState(false);
   const [copied, setCopied] = useState(false);
   const [participantsOpen, setParticipantsOpen] = useState(false);
+  const [isJoined, setIsJoined] = useState(false);
+  const [isJoining, setIsJoining] = useState(false);
 
   const clientIdRef = useRef(createClientId());
   const wsRef = useRef(null);
@@ -213,6 +215,9 @@ function Conference() {
   const redirectTimerRef = useRef(null);
   const microphoneActionRef = useRef(false);
   const cameraActionRef = useRef(false);
+  const joinActionRef = useRef(false);
+  const joinedRef = useRef(false);
+  const participantPollRef = useRef(null);
 
   useEffect(() => {
     const previousBodyOverflow = document.body.style.overflow;
@@ -754,21 +759,9 @@ function Conference() {
       return undefined;
     }
 
-    if (!claimSessionLock()) {
-      setRoom(null);
-      setError("Эта учетная запись уже подключена к конференции в другой вкладке");
-      setConnectionState("error");
-      setPageLoading(false);
-      return undefined;
-    }
-
     let cancelled = false;
-    let participantPoll;
 
-    const handleBeforeUnload = () => releaseSessionLock();
-    window.addEventListener("beforeunload", handleBeforeUnload);
-
-    const initialize = async () => {
+    const prepareConference = async () => {
       try {
         const roomResponse = await apiClient.get(
           `/rooms/${encodeURIComponent(inviteCode)}`,
@@ -787,81 +780,32 @@ function Conference() {
         setRoom(roomResponse.data);
 
         const mediaStream = await acquireInitialMedia();
-        const hasMicrophone = mediaStream.getAudioTracks().length > 0;
-        const hasCamera = mediaStream.getVideoTracks().length > 0;
-
-        micEnabledRef.current = hasMicrophone;
-        cameraEnabledRef.current = hasCamera;
-        setMicEnabled(hasMicrophone);
-        setCameraEnabled(hasCamera);
-
         if (cancelled) {
           mediaStream.getTracks().forEach((track) => track.stop());
           return;
         }
 
+        const hasMicrophone = mediaStream.getAudioTracks().length > 0;
+        const hasCamera = mediaStream.getVideoTracks().length > 0;
+
+        mediaStream.getAudioTracks().forEach((track) => {
+          track.enabled = hasMicrophone;
+        });
+        mediaStream.getVideoTracks().forEach((track) => {
+          track.enabled = hasCamera;
+        });
+
+        micEnabledRef.current = hasMicrophone;
+        cameraEnabledRef.current = hasCamera;
+        setMicEnabled(hasMicrophone);
+        setCameraEnabled(hasCamera);
         localStreamRef.current = mediaStream;
         cameraTrackRef.current = mediaStream.getVideoTracks()[0] || null;
-        setLocalPreview(mediaStream);
-
-        const socket = new WebSocket(
-          `${WS_URL}/ws/signal/${encodeURIComponent(inviteCode)}?token=${encodeURIComponent(token)}`,
-        );
-        wsRef.current = socket;
-
-        socket.onopen = () => {
-          if (cancelled) return;
-          setConnectionState("connected");
-          sendSignal({ type: "join" });
-          broadcastMediaStatus({
-            isMuted: mediaStream.getAudioTracks().every((track) => !track.enabled),
-            isVideoOff: mediaStream.getVideoTracks().every((track) => !track.enabled),
-            isScreenSharing: isSharingRef.current,
-          });
-        };
-
-        socket.onmessage = handleSignalMessage;
-
-        socket.onerror = () => {
-          if (!cancelled) {
-            setConnectionState("error");
-            setError("Не удалось подключиться к серверу конференции");
-          }
-        };
-
-        socket.onclose = () => {
-          if (!cancelled && !isLeavingRef.current) {
-            setConnectionState("error");
-            setError("Соединение с конференцией прерванo");
-          }
-        };
-
-        participantPoll = window.setInterval(async () => {
-          try {
-            const response = await apiClient.get(
-              `/rooms/${encodeURIComponent(inviteCode)}`,
-            );
-            if (!cancelled) {
-              if (!isRoomActive(response.data)) {
-                isLeavingRef.current = true;
-                setConnectionState("error");
-                setError("Конференция завершена");
-                wsRef.current?.close(1000, "Room ended");
-                releaseSessionLock();
-                redirectTimerRef.current = window.setTimeout(() => {
-                  navigate("/meetings", { replace: true });
-                }, 1800);
-                return;
-              }
-
-              setRoom(response.data);
-            }
-          } catch {
-            // Временная ошибка обновления списка не прерывает звонок.
-          }
-        }, 4000);
+        setLocalPreview(new MediaStream(mediaStream.getTracks()));
+        setConnectionState("ready");
       } catch (requestError) {
         if (!cancelled) {
+          setRoom(null);
           setError(getErrorMessage(requestError, "Конференция не найдена"));
           setConnectionState("error");
         }
@@ -870,55 +814,212 @@ function Conference() {
       }
     };
 
-    initialize();
+    void prepareConference();
 
     return () => {
       cancelled = true;
-      if (participantPoll) window.clearInterval(participantPoll);
+    };
+  }, [
+    acquireInitialMedia,
+    authLoading,
+    inviteCode,
+    isAuthenticated,
+    navigate,
+    token,
+  ]);
+
+  const startParticipantPolling = useCallback(() => {
+    if (participantPollRef.current) {
+      window.clearInterval(participantPollRef.current);
+    }
+
+    participantPollRef.current = window.setInterval(async () => {
+      try {
+        const response = await apiClient.get(
+          `/rooms/${encodeURIComponent(inviteCode)}`,
+        );
+
+        if (!isRoomActive(response.data)) {
+          isLeavingRef.current = true;
+          setConnectionState("error");
+          setError("Конференция завершена");
+          wsRef.current?.close(1000, "Room ended");
+          releaseSessionLock();
+          redirectTimerRef.current = window.setTimeout(() => {
+            navigate("/meetings", { replace: true });
+          }, 1800);
+          return;
+        }
+
+        setRoom(response.data);
+      } catch {
+        // Временная ошибка обновления списка не прерывает звонок.
+      }
+    }, 4000);
+  }, [inviteCode, navigate, releaseSessionLock]);
+
+  const joinConference = useCallback(async () => {
+    if (joinActionRef.current || joinedRef.current) return;
+
+    joinActionRef.current = true;
+    setIsJoining(true);
+    setConnectionState("connecting");
+    setError("");
+
+    try {
+      const roomResponse = await apiClient.get(
+        `/rooms/${encodeURIComponent(inviteCode)}`,
+      );
+      const statusError = getRoomStatusError(roomResponse.data);
+
+      if (statusError) {
+        setRoom(null);
+        setError(statusError);
+        setConnectionState("error");
+        joinActionRef.current = false;
+        setIsJoining(false);
+        return;
+      }
+
+      setRoom(roomResponse.data);
+
+      if (!claimSessionLock()) {
+        setError("Эта учетная запись уже подключена к конференции в другой вкладке");
+        setConnectionState("ready");
+        joinActionRef.current = false;
+        setIsJoining(false);
+        return;
+      }
+
+      isLeavingRef.current = false;
+
+      const socket = new WebSocket(
+        `${WS_URL}/ws/signal/${encodeURIComponent(inviteCode)}?token=${encodeURIComponent(token)}`,
+      );
+      wsRef.current = socket;
+
+      socket.onopen = () => {
+        if (wsRef.current !== socket) return;
+
+        joinedRef.current = true;
+        joinActionRef.current = false;
+        setIsJoined(true);
+        setIsJoining(false);
+        setConnectionState("connected");
+        sendSignal({ type: "join" });
+        broadcastMediaStatus({
+          isMuted: !micEnabledRef.current,
+          isVideoOff: !cameraEnabledRef.current,
+          isScreenSharing: isSharingRef.current,
+        });
+        startParticipantPolling();
+      };
+
+      socket.onmessage = handleSignalMessage;
+
+      socket.onerror = () => {
+        if (wsRef.current !== socket) return;
+
+        setConnectionState("error");
+        setError("Не удалось подключиться к серверу конференции");
+
+        if (!joinedRef.current) {
+          joinActionRef.current = false;
+          setIsJoining(false);
+          releaseSessionLock();
+        }
+      };
+
+      socket.onclose = () => {
+        if (wsRef.current !== socket) return;
+
+        wsRef.current = null;
+        joinActionRef.current = false;
+
+        if (participantPollRef.current) {
+          window.clearInterval(participantPollRef.current);
+          participantPollRef.current = null;
+        }
+
+        if (!joinedRef.current) {
+          setIsJoining(false);
+          releaseSessionLock();
+          return;
+        }
+
+        joinedRef.current = false;
+        if (!isLeavingRef.current) {
+          setConnectionState("error");
+          setError("Соединение с конференцией прервано");
+        }
+      };
+    } catch {
+      joinActionRef.current = false;
+      setIsJoining(false);
+      setConnectionState("error");
+      setError("Не удалось подключиться к серверу конференции");
+      releaseSessionLock();
+    }
+  }, [
+    broadcastMediaStatus,
+    claimSessionLock,
+    handleSignalMessage,
+    inviteCode,
+    releaseSessionLock,
+    sendSignal,
+    startParticipantPolling,
+    token,
+  ]);
+
+  useEffect(() => {
+    const handleBeforeUnload = () => releaseSessionLock();
+    window.addEventListener("beforeunload", handleBeforeUnload);
+
+    return () => {
       window.removeEventListener("beforeunload", handleBeforeUnload);
+
+      if (participantPollRef.current) {
+        window.clearInterval(participantPollRef.current);
+        participantPollRef.current = null;
+      }
 
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         wsRef.current.send(
           JSON.stringify({
             type: "leave",
             from: clientIdRef.current,
+            clientId: clientIdRef.current,
             userId: currentUserId,
             username: currentUsername,
           }),
         );
       }
 
+      isLeavingRef.current = true;
+      joinedRef.current = false;
       wsRef.current?.close();
       wsRef.current = null;
       closeConnections();
       stopMedia();
       releaseSessionLock();
+
       if (redirectTimerRef.current) {
         window.clearTimeout(redirectTimerRef.current);
         redirectTimerRef.current = null;
       }
     };
   }, [
-    acquireInitialMedia,
-    authLoading,
-    broadcastMediaStatus,
-    claimSessionLock,
     closeConnections,
     currentUserId,
     currentUsername,
-    handleSignalMessage,
-    inviteCode,
-    isAuthenticated,
-    navigate,
     releaseSessionLock,
-    sendSignal,
     stopMedia,
-    token,
   ]);
 
   const toggleMicrophone = async () => {
     if (microphoneActionRef.current) return;
     microphoneActionRef.current = true;
+    setError("");
 
     const nextEnabled = !micEnabledRef.current;
 
@@ -961,8 +1062,10 @@ function Conference() {
       const actualEnabled = Boolean(audioTrack && nextEnabled);
       micEnabledRef.current = actualEnabled;
       setMicEnabled(actualEnabled);
-      broadcastMediaStatus({ isMuted: !actualEnabled });
-      await updateStatusOnServer({ is_muted: !actualEnabled });
+      if (joinedRef.current) {
+        broadcastMediaStatus({ isMuted: !actualEnabled });
+        await updateStatusOnServer({ is_muted: !actualEnabled });
+      }
 
       if (nextEnabled && !audioTrack) {
         setError("Микрофон недоступен. Разрешите доступ в настройках браузера");
@@ -977,6 +1080,7 @@ function Conference() {
   const toggleCamera = async () => {
     if (isSharingRef.current || cameraActionRef.current) return;
     cameraActionRef.current = true;
+    setError("");
 
     const nextEnabled = !cameraEnabledRef.current;
 
@@ -1018,8 +1122,10 @@ function Conference() {
       const actualEnabled = Boolean(videoTrack && nextEnabled);
       cameraEnabledRef.current = actualEnabled;
       setCameraEnabled(actualEnabled);
-      broadcastMediaStatus({ isVideoOff: !actualEnabled });
-      await updateStatusOnServer({ is_video_off: !actualEnabled });
+      if (joinedRef.current) {
+        broadcastMediaStatus({ isVideoOff: !actualEnabled });
+        await updateStatusOnServer({ is_video_off: !actualEnabled });
+      }
 
       if (nextEnabled && !videoTrack) {
         setError("Камера недоступна. Разрешите доступ в настройках браузера");
@@ -1116,7 +1222,14 @@ function Conference() {
 
   const leaveConference = async () => {
     isLeavingRef.current = true;
+    joinedRef.current = false;
+    setIsJoined(false);
     sendSignal({ type: "leave" });
+
+    if (participantPollRef.current) {
+      window.clearInterval(participantPollRef.current);
+      participantPollRef.current = null;
+    }
 
     try {
       await apiClient.post(`/rooms/${encodeURIComponent(inviteCode)}/leave`);
@@ -1284,7 +1397,7 @@ function Conference() {
     return (
       <main className={styles.loadingPage}>
         <span className={styles.loader} />
-        <p>Подключаемся к конференции…</p>
+        <p>Проверяем камеру и микрофон…</p>
       </main>
     );
   }
@@ -1301,6 +1414,145 @@ function Conference() {
           </button>
         </section>
       </main>
+    );
+  }
+
+  if (!isJoined) {
+    const participantsWaiting = room?.participants?.length || 0;
+
+    return (
+      <div className={styles.prejoinPage}>
+        <header className={styles.prejoinHeader}>
+          <button
+            type="button"
+            className={styles.brand}
+            onClick={() => navigate("/")}
+          >
+            TalkSphere
+          </button>
+
+          <button
+            type="button"
+            className={styles.prejoinBack}
+            onClick={() => navigate("/meetings")}
+          >
+            Вернуться ко встречам
+          </button>
+        </header>
+
+        {error && <div className={styles.prejoinToast}>{error}</div>}
+
+        <main className={styles.prejoinMain}>
+          <section className={styles.prejoinPreviewCard}>
+            <div className={styles.prejoinPreview}>
+              <VideoTile
+                stream={localPreview}
+                name={currentUsername}
+                videoMuted
+                isMicOff={!micEnabled}
+                videoOff={!cameraEnabled}
+                isLocal
+                mirror
+              />
+            </div>
+
+            <div className={styles.prejoinControls} aria-label="Настройки устройств">
+              <button
+                type="button"
+                className={`${styles.prejoinControl} ${
+                  !micEnabled ? styles.prejoinControlOff : ""
+                }`}
+                onClick={(event) => handleControlClick(event, toggleMicrophone)}
+                aria-pressed={micEnabled}
+                aria-label={micEnabled ? "Выключить микрофон" : "Включить микрофон"}
+              >
+                <MicIcon off={!micEnabled} />
+                <span>{micEnabled ? "Микрофон включён" : "Микрофон выключен"}</span>
+              </button>
+
+              <button
+                type="button"
+                className={`${styles.prejoinControl} ${
+                  !cameraEnabled ? styles.prejoinControlOff : ""
+                }`}
+                onClick={(event) => handleControlClick(event, toggleCamera)}
+                aria-pressed={cameraEnabled}
+                aria-label={cameraEnabled ? "Выключить камеру" : "Включить камеру"}
+              >
+                <CameraIcon off={!cameraEnabled} />
+                <span>{cameraEnabled ? "Камера включена" : "Камера выключена"}</span>
+              </button>
+            </div>
+          </section>
+
+          <aside className={styles.prejoinPanel}>
+            <p className={styles.prejoinEyebrow}>Проверка перед входом</p>
+            <h1>{room?.title || "Конференция"}</h1>
+            <p className={styles.prejoinDescription}>
+              Настройте камеру и микрофон. В конференцию вы войдёте только после
+              нажатия кнопки «Подключиться».
+            </p>
+
+            <div className={styles.prejoinRoomMeta}>
+              <span>Код встречи</span>
+              <strong>{inviteCode}</strong>
+            </div>
+
+            <div className={styles.prejoinStatusList}>
+              <div>
+                <span className={micEnabled ? styles.deviceReady : styles.deviceOff}>
+                  <MicIcon off={!micEnabled} />
+                </span>
+                <p>
+                  <strong>Микрофон</strong>
+                  <small>{micEnabled ? "Будет включён при входе" : "Вход без звука"}</small>
+                </p>
+              </div>
+
+              <div>
+                <span className={cameraEnabled ? styles.deviceReady : styles.deviceOff}>
+                  <CameraIcon off={!cameraEnabled} />
+                </span>
+                <p>
+                  <strong>Камера</strong>
+                  <small>{cameraEnabled ? "Будет включена при входе" : "Вход без видео"}</small>
+                </p>
+              </div>
+            </div>
+
+            <p className={styles.prejoinParticipants}>
+              {participantsWaiting > 0
+                ? `Сейчас во встрече: ${participantsWaiting}`
+                : "Во встрече пока никого нет"}
+            </p>
+
+            <button
+              type="button"
+              className={styles.prejoinJoinButton}
+              onClick={(event) => handleControlClick(event, joinConference)}
+              disabled={isJoining}
+            >
+              {isJoining ? (
+                <>
+                  <span className={styles.joinSpinner} />
+                  Подключаемся…
+                </>
+              ) : (
+                "Подключиться"
+              )}
+            </button>
+
+            <button
+              type="button"
+              className={styles.prejoinSecondaryButton}
+              onClick={() => navigate("/meetings")}
+              disabled={isJoining}
+            >
+              Отмена
+            </button>
+          </aside>
+        </main>
+      </div>
     );
   }
 
