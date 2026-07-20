@@ -126,7 +126,7 @@ function Meetings() {
             <button
               type="button"
               className={`${styles.action} ${styles.secondaryAction}`}
-              onClick={() => setDialog("schedule")}
+              onClick={() => navigate("/calendar")}
             >
               <span className={styles.iconBox}>
                 <CalendarIcon />
@@ -214,22 +214,6 @@ function Meetings() {
               </form>
             )}
 
-            {dialog === "schedule" && (
-              <>
-                <h2 id="meeting-dialog-title">Планирование</h2>
-                <p className={styles.dialogText}>
-                  Планирование будет связано со страницей календаря. В текущем
-                  API пока нет отдельного метода для запланированных встреч.
-                </p>
-                <button
-                  type="button"
-                  className={styles.dialogButton}
-                  onClick={closeDialog}
-                >
-                  Понятно
-                </button>
-              </>
-            )}
           </div>
         </div>
       )}

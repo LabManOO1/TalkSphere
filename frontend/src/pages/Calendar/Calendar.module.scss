@@ -1,0 +1,560 @@
+@use "../../assets/styles/variables" as *;
+
+.page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: $white-color;
+  color: $secondary-color;
+}
+
+.main {
+  flex: 1;
+  width: 100%;
+  padding: 0 100px 48px;
+}
+
+.datePicker {
+  position: relative;
+  width: max-content;
+  z-index: 20;
+}
+
+.dateButton {
+  min-height: 56px;
+  padding: 0 2px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  color: $secondary-color;
+  font-family: "Manrope", sans-serif;
+  font-size: 27px;
+  font-weight: 700;
+  line-height: 1;
+
+  svg {
+    width: 22px;
+    height: 22px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2.4;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    transition: transform 0.2s ease;
+  }
+
+  &[aria-expanded="true"] svg {
+    transform: rotate(180deg);
+  }
+
+  &:focus-visible {
+    outline: 3px solid rgba(160, 0, 5, 0.22);
+    outline-offset: 4px;
+    border-radius: 8px;
+  }
+}
+
+.calendarContent {
+  display: flex;
+  align-items: flex-start;
+  gap: 28px;
+  margin-top: 1px;
+}
+
+.meetingsList {
+  width: 338px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.meetingCard,
+.scheduleButton {
+  width: 338px;
+  min-height: 120px;
+  border-radius: 22px;
+}
+
+.meetingCard {
+  position: relative;
+  padding: 19px 20px 15px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  overflow: hidden;
+  background: #1d1d1d;
+  color: $white-color;
+  font-family: "Manrope", sans-serif;
+
+  h2 {
+    margin: 0 20px;
+    overflow: hidden;
+    color: inherit;
+    font-size: 20px;
+    font-weight: 700;
+    line-height: 1.25;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.emptyCard {
+  justify-content: center;
+  align-items: center;
+  padding: 20px;
+  font-size: 20px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.meetingMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  font-size: 14px;
+  font-weight: 500;
+
+  time {
+    flex-shrink: 0;
+  }
+}
+
+.participantsMeta {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  svg {
+    width: 31px;
+    height: 26px;
+    flex-shrink: 0;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+}
+
+.removeMeeting {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 24px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.2s ease, background 0.2s ease, color 0.2s ease;
+
+  &:hover,
+  &:focus-visible {
+    background: rgba(255, 255, 255, 0.12);
+    color: $white-color;
+  }
+}
+
+.meetingCard:hover .removeMeeting,
+.removeMeeting:focus-visible {
+  opacity: 1;
+}
+
+.scheduleButton {
+  padding: 0 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: linear-gradient(105deg, #b60008 0%, #970006 42%, #4d0003 100%);
+  color: $white-color;
+  font-family: "Manrope", sans-serif;
+  font-size: 20px;
+  font-weight: 700;
+  box-shadow: 0 10px 24px rgba(111, 0, 5, 0.08);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+
+  svg {
+    width: 31px;
+    height: 31px;
+    flex-shrink: 0;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 3.2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 14px 28px rgba(111, 0, 5, 0.18);
+  }
+
+  &:focus-visible {
+    outline: 3px solid rgba(160, 0, 5, 0.25);
+    outline-offset: 5px;
+  }
+}
+
+.calendarPopover {
+  position: absolute;
+  top: 58px;
+  left: 0;
+  width: 344px;
+  padding: 18px;
+  border: 1px solid rgba(72, 0, 3, 0.12);
+  border-radius: 22px;
+  background: $white-color;
+  box-shadow: 0 24px 60px rgba(40, 0, 2, 0.18);
+}
+
+.calendarHeader {
+  display: grid;
+  grid-template-columns: 38px 1fr 38px;
+  align-items: center;
+  margin-bottom: 13px;
+
+  strong {
+    font-family: "Manrope", sans-serif;
+    font-size: 17px;
+    font-weight: 800;
+    text-align: center;
+  }
+
+  button {
+    width: 36px;
+    height: 36px;
+    border-radius: 11px;
+    display: grid;
+    place-items: center;
+    background: transparent;
+    color: $secondary-color;
+
+    &:hover {
+      background: #f2f2f2;
+    }
+
+    svg {
+      width: 20px;
+      height: 20px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2.2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+  }
+}
+
+.chevronLeft {
+  transform: rotate(90deg);
+}
+
+.chevronRight {
+  transform: rotate(-90deg);
+}
+
+.weekdays,
+.calendarGrid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+}
+
+.weekdays {
+  margin-bottom: 5px;
+
+  span {
+    padding: 5px 0;
+    color: #878787;
+    font-family: "Manrope", sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    text-align: center;
+  }
+}
+
+.calendarGrid {
+  gap: 3px;
+}
+
+.dayButton {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 11px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  color: $secondary-color;
+  font-family: "Manrope", sans-serif;
+  font-size: 13px;
+  font-weight: 650;
+
+  &:hover {
+    background: #f3f3f3;
+  }
+}
+
+.outsideMonth {
+  color: #b8b8b8;
+}
+
+.today {
+  box-shadow: inset 0 0 0 1.5px #a10005;
+  color: #8e0005;
+}
+
+.selectedDay {
+  background: linear-gradient(135deg, #b50008, #650004);
+  color: $white-color;
+  box-shadow: none;
+
+  &:hover {
+    background: linear-gradient(135deg, #b50008, #650004);
+  }
+}
+
+.meetingDot {
+  position: absolute;
+  left: 50%;
+  bottom: 4px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #b50008;
+  transform: translateX(-50%);
+}
+
+.selectedDay .meetingDot {
+  background: $white-color;
+}
+
+.goTodayButton {
+  width: 100%;
+  min-height: 38px;
+  margin-top: 12px;
+  border-radius: 12px;
+  background: #f1f1f1;
+  color: #770005;
+  font-family: "Manrope", sans-serif;
+  font-size: 13px;
+  font-weight: 750;
+
+  &:hover {
+    background: #e7e7e7;
+  }
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  padding: 24px;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.56);
+  backdrop-filter: blur(4px);
+}
+
+.dialog {
+  position: relative;
+  width: min(480px, 100%);
+  padding: 36px 34px 30px;
+  border-radius: 26px;
+  background: $white-color;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.3);
+
+  h2 {
+    margin: 0 42px 26px 0;
+    font-family: "Manrope", sans-serif;
+    font-size: 27px;
+    line-height: 1.2;
+  }
+}
+
+.closeButton {
+  position: absolute;
+  top: 13px;
+  right: 16px;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: transparent;
+  color: $secondary-color;
+  font-size: 32px;
+  line-height: 1;
+
+  &:hover {
+    background: #f0f0f0;
+  }
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 17px;
+}
+
+.formRow {
+  display: grid;
+  grid-template-columns: 1fr 0.75fr;
+  gap: 14px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  color: #5b5b5b;
+  font-family: "Manrope", sans-serif;
+  font-size: 13px;
+  font-weight: 650;
+
+  input {
+    width: 100%;
+    min-height: 50px;
+    padding: 0 15px;
+    border: 1.5px solid #b40008;
+    border-radius: 16px;
+    background: #fafafa;
+    color: $secondary-color;
+    font: inherit;
+    font-size: 15px;
+    outline: none;
+
+    &:focus {
+      border-color: #720004;
+      box-shadow: 0 0 0 3px rgba(164, 0, 0, 0.11);
+    }
+  }
+}
+
+.formError {
+  margin: -5px 0 0;
+  color: #a10005;
+  font-family: "Manrope", sans-serif;
+  font-size: 13px;
+}
+
+.formHint {
+  margin: -2px 0 0;
+  color: #747474;
+  font-family: "Manrope", sans-serif;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.submitButton {
+  min-height: 52px;
+  margin-top: 2px;
+  border-radius: 17px;
+  background: linear-gradient(100deg, #b60008, #570003);
+  color: $white-color;
+  font-family: "Manrope", sans-serif;
+  font-size: 16px;
+  font-weight: 800;
+
+  &:hover {
+    filter: brightness(1.05);
+  }
+}
+
+@media (max-width: 1200px) {
+  .main {
+    padding-right: 60px;
+    padding-left: 60px;
+  }
+}
+
+@media (max-width: 768px) {
+  .main {
+    padding: 4px 32px 44px;
+  }
+
+  .dateButton {
+    font-size: 24px;
+  }
+
+  .calendarContent {
+    width: 100%;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  .meetingsList,
+  .meetingCard,
+  .scheduleButton {
+    width: min(100%, 430px);
+  }
+
+  .calendarPopover {
+    width: min(344px, calc(100vw - 64px));
+  }
+}
+
+@media (max-width: 480px) {
+  .main {
+    padding: 2px 16px 32px;
+  }
+
+  .dateButton {
+    min-height: 50px;
+    font-size: 22px;
+  }
+
+  .meetingCard,
+  .scheduleButton {
+    min-height: 108px;
+    border-radius: 19px;
+  }
+
+  .meetingCard h2,
+  .emptyCard,
+  .scheduleButton {
+    font-size: 17px;
+  }
+
+  .scheduleButton {
+    justify-content: flex-start;
+  }
+
+  .calendarPopover {
+    left: 0;
+    width: calc(100vw - 32px);
+    padding: 14px;
+  }
+
+  .dialog {
+    padding: 34px 20px 24px;
+    border-radius: 22px;
+
+    h2 {
+      font-size: 23px;
+    }
+  }
+
+  .formRow {
+    grid-template-columns: 1fr;
+  }
+
+  .removeMeeting {
+    opacity: 1;
+  }
+}
+
+.scheduleButton:disabled {
+  cursor: wait;
+  opacity: 0.72;
+  transform: none;
+  box-shadow: none;
+}

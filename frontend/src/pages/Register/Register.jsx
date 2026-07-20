@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import styles from './Register.module.scss';
 
@@ -13,6 +13,7 @@ function Register() {
 
   const { register } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -51,7 +52,13 @@ function Register() {
       );
 
       if (result.success) {
-        navigate('/', { replace: true });
+        const redirectTo =
+          location.state?.from ||
+          sessionStorage.getItem('redirect_after_login') ||
+          '/';
+
+        sessionStorage.removeItem('redirect_after_login');
+        navigate(redirectTo, { replace: true });
         return;
       }
 

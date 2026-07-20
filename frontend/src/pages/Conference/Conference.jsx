@@ -47,6 +47,19 @@ const createClientId = () => {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 };
 
+const CHAT_MESSAGE_LIMIT = 1500;
+const CHAT_HISTORY_LIMIT = 200;
+
+const formatChatTime = (value) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+
+  return new Intl.DateTimeFormat("ru-RU", {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+};
+
 function MicIcon({ off = false }) {
   return (
     <svg viewBox="0 0 32 32" aria-hidden="true">
@@ -101,6 +114,24 @@ function PeopleIcon() {
       <circle cx="22" cy="11" r="5" />
       <path d="M2 28c.4-8 3.5-12 9-12 4 0 6.7 2.1 8 6" />
       <path d="M13 28c.4-8 3.5-12 9-12s8.6 4 9 12H13Z" />
+    </svg>
+  );
+}
+
+function ChatIcon() {
+  return (
+    <svg viewBox="0 0 32 32" aria-hidden="true">
+      <path d="M5 6h22v15H13l-7 6v-6H5V6Z" />
+      <path d="M10 11h12M10 16h8" />
+    </svg>
+  );
+}
+
+function SendIcon() {
+  return (
+    <svg viewBox="0 0 32 32" aria-hidden="true">
+      <path d="m4 15 24-10-8 22-5-9-11-3Z" />
+      <path d="m15 18 13-13" />
     </svg>
   );
 }
@@ -195,6 +226,10 @@ function Conference() {
   const [isSharing, setIsSharing] = useState(false);
   const [copied, setCopied] = useState(false);
   const [participantsOpen, setParticipantsOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatMessages, setChatMessages] = useState([]);
+  const [chatDraft, setChatDraft] = useState("");
+  const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [isJoined, setIsJoined] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
 
@@ -218,6 +253,8 @@ function Conference() {
   const joinActionRef = useRef(false);
   const joinedRef = useRef(false);
   const participantPollRef = useRef(null);
+  const chatOpenRef = useRef(false);
+  const chatMessagesEndRef = useRef(null);
 
   useEffect(() => {
     const previousBodyOverflow = document.body.style.overflow;
@@ -234,6 +271,28 @@ function Conference() {
       document.body.style.overscrollBehavior = previousBodyOverscroll;
     };
   }, []);
+
+  useEffect(() => {
+    chatOpenRef.current = chatOpen;
+
+    if (!chatOpen) return;
+
+    setUnreadChatCount(0);
+    window.requestAnimationFrame(() => {
+      chatMessagesEndRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "end",
+      });
+    });
+  }, [chatOpen, chatMessages.length]);
+
+  useEffect(() => {
+    setChatMessages([]);
+    setChatDraft("");
+    setUnreadChatCount(0);
+    setChatOpen(false);
+    chatOpenRef.current = false;
+  }, [inviteCode]);
 
   const updateRemoteParticipant = useCallback((peerId, patch) => {
     if (!peerId) return;
@@ -316,6 +375,121 @@ function Conference() {
 
     socket.send(JSON.stringify(payload));
   }, [currentUserId, currentUsername]);
+
+  const appendChatMessage = useCallback(
+    (incomingMessage) => {
+      const text = String(incomingMessage.text || "")
+        .trim()
+        .slice(0, CHAT_MESSAGE_LIMIT);
+
+      if (!text) return;
+
+      const userId = incomingMessage.userId ?? null;
+      const sentAt = incomingMessage.sentAt || new Date().toISOString();
+      const isOwn =
+        Boolean(incomingMessage.isOwn) ||
+        (userId != null &&
+          currentUserId != null &&
+          String(userId) === String(currentUserId));
+      const id = String(
+        incomingMessage.id ||
+          `${userId || incomingMessage.username || "participant"}:${sentAt}:${text}`,
+      );
+
+      setChatMessages((current) => {
+        if (current.some((message) => message.id === id)) return current;
+
+        return [
+          ...current,
+          {
+            id,
+            userId,
+            username: incomingMessage.username || "Участник",
+            text,
+            sentAt,
+            isOwn,
+          },
+        ].slice(-CHAT_HISTORY_LIMIT);
+      });
+
+      if (!isOwn && !chatOpenRef.current) {
+        setUnreadChatCount((current) => Math.min(current + 1, 99));
+      }
+    },
+    [currentUserId],
+  );
+
+  const closeChatPanel = useCallback(() => {
+    chatOpenRef.current = false;
+    setChatOpen(false);
+  }, []);
+
+  const toggleChatPanel = useCallback(() => {
+    const nextOpen = !chatOpenRef.current;
+    chatOpenRef.current = nextOpen;
+    setChatOpen(nextOpen);
+
+    if (nextOpen) {
+      setParticipantsOpen(false);
+      setUnreadChatCount(0);
+    }
+  }, []);
+
+  const toggleParticipantsPanel = useCallback(() => {
+    closeChatPanel();
+    setParticipantsOpen((current) => !current);
+  }, [closeChatPanel]);
+
+  const sendChatMessage = useCallback(
+    (event) => {
+      event?.preventDefault();
+
+      const text = chatDraft.trim().slice(0, CHAT_MESSAGE_LIMIT);
+      if (!text) return;
+
+      if (wsRef.current?.readyState !== WebSocket.OPEN) {
+        setError("Чат недоступен: соединение с конференцией не установлено");
+        return;
+      }
+
+      const messageId = createClientId();
+      const sentAt = new Date().toISOString();
+
+      appendChatMessage({
+        id: messageId,
+        userId: currentUserId,
+        username: currentUsername,
+        text,
+        sentAt,
+        isOwn: true,
+      });
+
+      sendSignal({
+        type: "chat-message",
+        messageId,
+        message_id: messageId,
+        text,
+        sentAt,
+        sent_at: sentAt,
+      });
+      setChatDraft("");
+    },
+    [appendChatMessage, chatDraft, currentUserId, currentUsername, sendSignal],
+  );
+
+  const handleChatKeyDown = useCallback(
+    (event) => {
+      if (
+        event.key === "Enter" &&
+        !event.shiftKey &&
+        !event.nativeEvent?.isComposing
+      ) {
+        event.preventDefault();
+        sendChatMessage();
+      }
+    },
+    [sendChatMessage],
+  );
 
   const flushQueuedCandidates = useCallback(async (peerId, connection) => {
     const queued = queuedCandidatesRef.current.get(peerId) || [];
@@ -507,6 +681,26 @@ function Conference() {
 
       if (messageTarget && messageTarget !== clientIdRef.current) return;
 
+      if (["chat-message", "chat_message", "chat"].includes(message.type)) {
+        const text = String(
+          message.text ?? message.message ?? message.content ?? "",
+        )
+          .trim()
+          .slice(0, CHAT_MESSAGE_LIMIT);
+
+        if (!text) return;
+
+        appendChatMessage({
+          id: message.messageId ?? message.message_id ?? null,
+          userId: messageUserId,
+          username: messageUsername,
+          text,
+          sentAt: message.sentAt ?? message.sent_at ?? new Date().toISOString(),
+          isOwn: messageFrom === clientIdRef.current,
+        });
+        return;
+      }
+
       if (message.type === "room_state") {
         (message.participants || []).forEach((participant) => {
           const userId = participant.userId ?? participant.user_id ?? null;
@@ -677,6 +871,7 @@ function Conference() {
       }
     },
     [
+      appendChatMessage,
       broadcastMediaStatus,
       createOffer,
       createPeerConnection,
@@ -1672,6 +1867,80 @@ function Conference() {
             ))}
           </ul>
         </aside>
+
+        <aside
+          className={`${styles.chatPanel} ${chatOpen ? styles.panelOpen : ""}`}
+          aria-hidden={!chatOpen}
+        >
+          <div className={styles.panelHeader}>
+            <h2>Чат встречи</h2>
+            <button
+              type="button"
+              onClick={closeChatPanel}
+              aria-label="Закрыть чат"
+            >
+              ×
+            </button>
+          </div>
+
+          <div
+            className={styles.chatMessages}
+            role="log"
+            aria-live="polite"
+            aria-label="Сообщения чата"
+          >
+            {chatMessages.length === 0 ? (
+              <div className={styles.chatEmpty}>
+                <ChatIcon />
+                <strong>Сообщений пока нет</strong>
+                <span>Напишите первое сообщение участникам встречи.</span>
+              </div>
+            ) : (
+              chatMessages.map((message) => (
+                <article
+                  key={message.id}
+                  className={`${styles.chatMessage} ${
+                    message.isOwn ? styles.ownChatMessage : ""
+                  }`}
+                >
+                  <div className={styles.chatMessageMeta}>
+                    <strong>
+                      {message.isOwn ? "Вы" : message.username || "Участник"}
+                    </strong>
+                    <time dateTime={message.sentAt}>
+                      {formatChatTime(message.sentAt)}
+                    </time>
+                  </div>
+                  <p>{message.text}</p>
+                </article>
+              ))
+            )}
+            <div ref={chatMessagesEndRef} aria-hidden="true" />
+          </div>
+
+          <form className={styles.chatForm} onSubmit={sendChatMessage}>
+            <textarea
+              value={chatDraft}
+              onChange={(event) => setChatDraft(event.target.value)}
+              onKeyDown={handleChatKeyDown}
+              maxLength={CHAT_MESSAGE_LIMIT}
+              rows={2}
+              placeholder="Сообщение участникам"
+              aria-label="Текст сообщения"
+            />
+            <button
+              type="submit"
+              className={styles.chatSendButton}
+              disabled={!chatDraft.trim() || connectionState !== "connected"}
+              aria-label="Отправить сообщение"
+            >
+              <SendIcon />
+            </button>
+            <small className={styles.chatHint}>
+              Enter — отправить, Shift+Enter — новая строка
+            </small>
+          </form>
+        </aside>
       </main>
 
       <footer className={styles.controlsBar}>
@@ -1717,13 +1986,38 @@ function Conference() {
 
         <button
           type="button"
-          className={styles.participantsControl}
+          className={`${styles.chatControl} ${chatOpen ? styles.controlActive : ""}`}
           onClick={(event) => {
             event.preventDefault();
             event.stopPropagation();
-            setParticipantsOpen((value) => !value);
+            toggleChatPanel();
+          }}
+          aria-label={
+            unreadChatCount > 0
+              ? `Чат: ${unreadChatCount} непрочитанных сообщений`
+              : "Открыть чат"
+          }
+          aria-pressed={chatOpen}
+        >
+          <span className={styles.chatIcon} aria-hidden="true">
+            <ChatIcon />
+            {unreadChatCount > 0 && <strong>{unreadChatCount}</strong>}
+          </span>
+          <span>Чат</span>
+        </button>
+
+        <button
+          type="button"
+          className={`${styles.participantsControl} ${
+            participantsOpen ? styles.controlActive : ""
+          }`}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            toggleParticipantsPanel();
           }}
           aria-label={`Участники: ${displayedParticipants.length}`}
+          aria-pressed={participantsOpen}
         >
           <span className={styles.participantsIcon} aria-hidden="true">
             <PeopleIcon />

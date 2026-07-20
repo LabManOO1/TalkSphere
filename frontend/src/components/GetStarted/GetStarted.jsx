@@ -1,4 +1,5 @@
-import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "../../context/AuthContext";
 import styles from "./GetStarted.module.scss";
 
 const steps = [
@@ -8,6 +9,15 @@ const steps = [
 ];
 
 function GetStarted() {
+  const navigate = useNavigate();
+  const { isAuthenticated, loading } = useAuth();
+
+  const handleGetStarted = () => {
+    if (loading) return;
+
+    navigate(isAuthenticated ? "/meetings" : "/register");
+  };
+
   return (
     <section className={styles.getStarted}>
       <img
@@ -16,6 +26,7 @@ function GetStarted() {
         alt=""
         aria-hidden="true"
       />
+
       <div className={`container ${styles.content}`}>
         <h2 className={styles.heading}>Как начать работу?</h2>
 
@@ -37,9 +48,14 @@ function GetStarted() {
           Создайте аккаунт и проведите первую встречу через 5 минут
         </h3>
 
-        <Link to="/register" className={styles.cta}>
-          Попробовать бесплатно
-        </Link>
+        <button
+          type="button"
+          className={styles.cta}
+          onClick={handleGetStarted}
+          disabled={loading}
+        >
+          {isAuthenticated ? "Перейти к встречам" : "Попробовать бесплатно"}
+        </button>
 
         <p className={styles.footNote}>
           Начните использовать TalkSphere уже сегодня!

@@ -230,9 +230,14 @@
     transition: transform .3s ease, box-shadow .3s ease;
 
 
-    &:hover {
+    &:hover:not(:disabled) {
         transform: translateY(-2px);
         box-shadow: 0 16px 36px rgba(164, 0, 0, .45);
+    }
+
+    &:disabled {
+        cursor: default;
+        opacity: .65;
     }
 
 

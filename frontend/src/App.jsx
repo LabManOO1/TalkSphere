@@ -7,6 +7,7 @@ import Meetings from "./pages/Meetings/Meetings";
 import JoinMeeting from "./pages/JoinMeeting/JoinMeeting";
 import Conference from "./pages/Conference/Conference";
 import Profile from "./pages/Profile/Profile";
+import Calendar from "./pages/Calendar/Calendar";
 
 function RequireAuth({ children }) {
   const location = useLocation();
@@ -52,6 +53,7 @@ function App() {
           <Route path="/meetings" element={<Meetings />} />
           <Route path="/meetings/join" element={<JoinMeeting />} />
           <Route path="/conference/:inviteCode" element={<Conference />} />
+          <Route path="/calendar" element={<Calendar />} />
           <Route
             path="/profile"
             element={
