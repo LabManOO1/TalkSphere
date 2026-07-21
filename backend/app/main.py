@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .routers import rest_router
-from .websocket import signal
+from .websocket import ws_router
 
 app = FastAPI(
     title="TalsSphere API",
@@ -18,4 +18,4 @@ app.add_middleware(
 )
 
 app.include_router(rest_router)
-app.include_router(signal.signal_router)
+app.include_router(ws_router)
