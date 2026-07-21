@@ -35,8 +35,8 @@ function ScheduleMeeting() {
   const [duration, setDuration] = useState("60");
   const [participants, setParticipants] = useState("");
   const [description, setDescription] = useState("");
-  const [cameraOnJoin, setCameraOnJoin] = useState(true);
-  const [microphoneOnJoin, setMicrophoneOnJoin] = useState(true);
+  const [disableParticipantCamera, setDisableParticipantCamera] = useState(false);
+  const [disableParticipantMicrophone, setDisableParticipantMicrophone] = useState(false);
   const [creatorOnlyScreenShare, setCreatorOnlyScreenShare] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [error, setError] = useState("");
@@ -82,8 +82,10 @@ function ScheduleMeeting() {
         scheduled_end: end.toISOString(),
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
         participant_emails: participantEmails,
-        camera_on_join: cameraOnJoin,
-        microphone_on_join: microphoneOnJoin,
+        camera_on_join: true,
+        microphone_on_join: true,
+        allow_participant_camera: !disableParticipantCamera,
+        allow_participant_microphone: !disableParticipantMicrophone,
         screen_share_policy: creatorOnlyScreenShare ? "creator_only" : "everyone",
       });
       navigate(`/calendar?date=${encodeURIComponent(date)}&created=${encodeURIComponent(response.data.id)}`, {
@@ -142,9 +144,42 @@ function ScheduleMeeting() {
               </button>
               {settingsOpen && (
                 <div className={styles.settingsList}>
-                  <label className={styles.switchRow}><input type="checkbox" checked={cameraOnJoin} onChange={(event) => setCameraOnJoin(event.target.checked)} /><span>Включать камеру при входе</span></label>
-                  <label className={styles.switchRow}><input type="checkbox" checked={microphoneOnJoin} onChange={(event) => setMicrophoneOnJoin(event.target.checked)} /><span>Включать микрофон при входе</span></label>
-                  <label className={styles.switchRow}><input type="checkbox" checked={creatorOnlyScreenShare} onChange={(event) => setCreatorOnlyScreenShare(event.target.checked)} /><span>Демонстрация экрана только для создателя</span></label>
+                  <p className={styles.settingsHint}>
+                    Ограничения применяются к участникам. Создатель встречи сохраняет доступ к своим устройствам.
+                  </p>
+                  <label className={styles.switchRow}>
+                    <input
+                      type="checkbox"
+                      checked={disableParticipantCamera}
+                      onChange={(event) => setDisableParticipantCamera(event.target.checked)}
+                    />
+                    <span>
+                      <strong>Запретить камеры участникам</strong>
+                      <small>Участники не смогут включить видео во время встречи.</small>
+                    </span>
+                  </label>
+                  <label className={styles.switchRow}>
+                    <input
+                      type="checkbox"
+                      checked={disableParticipantMicrophone}
+                      onChange={(event) => setDisableParticipantMicrophone(event.target.checked)}
+                    />
+                    <span>
+                      <strong>Запретить микрофоны участникам</strong>
+                      <small>Участники не смогут включить звук во время встречи.</small>
+                    </span>
+                  </label>
+                  <label className={styles.switchRow}>
+                    <input
+                      type="checkbox"
+                      checked={creatorOnlyScreenShare}
+                      onChange={(event) => setCreatorOnlyScreenShare(event.target.checked)}
+                    />
+                    <span>
+                      <strong>Запретить демонстрацию экрана участникам</strong>
+                      <small>Демонстрацию сможет запускать только создатель встречи.</small>
+                    </span>
+                  </label>
                   <label className={styles.descriptionField}><span>Описание</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} maxLength={3000} rows={3} placeholder="Повестка, ссылки и заметки" /></label>
                 </div>
               )}

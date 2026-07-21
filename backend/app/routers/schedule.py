@@ -37,6 +37,8 @@ class CreateScheduleRequest(BaseModel):
     participant_emails: List[EmailStr] = Field(default_factory=list)
     camera_on_join: bool = True
     microphone_on_join: bool = True
+    allow_participant_camera: bool = True
+    allow_participant_microphone: bool = True
     screen_share_policy: str = SCREEN_SHARE_EVERYONE
 
 
@@ -50,6 +52,8 @@ class UpdateScheduleRequest(BaseModel):
     participant_emails: Optional[List[EmailStr]] = None
     camera_on_join: Optional[bool] = None
     microphone_on_join: Optional[bool] = None
+    allow_participant_camera: Optional[bool] = None
+    allow_participant_microphone: Optional[bool] = None
     screen_share_policy: Optional[str] = None
 
 
@@ -68,6 +72,8 @@ class ScheduleResponse(BaseModel):
     participants: List[dict] = Field(default_factory=list)
     camera_on_join: bool
     microphone_on_join: bool
+    allow_participant_camera: bool
+    allow_participant_microphone: bool
     screen_share_policy: str
 
 
@@ -156,6 +162,8 @@ def _serialize(db: Session, scheduled: ScheduledConference, current_user_id: uui
         "participants_count": len(participants),
         "camera_on_join": bool(scheduled.camera_on_join),
         "microphone_on_join": bool(scheduled.microphone_on_join),
+        "allow_participant_camera": bool(scheduled.allow_participant_camera),
+        "allow_participant_microphone": bool(scheduled.allow_participant_microphone),
         "screen_share_policy": scheduled.screen_share_policy or SCREEN_SHARE_EVERYONE,
     }
 
@@ -193,6 +201,8 @@ async def create_scheduled_conference(
         status=RoomStatus.active,
         camera_on_join=request.camera_on_join,
         microphone_on_join=request.microphone_on_join,
+        allow_participant_camera=request.allow_participant_camera,
+        allow_participant_microphone=request.allow_participant_microphone,
         screen_share_policy=screen_share_policy,
     )
     db.add(room)
@@ -209,6 +219,8 @@ async def create_scheduled_conference(
         status=ConferenceStatus.scheduled,
         camera_on_join=request.camera_on_join,
         microphone_on_join=request.microphone_on_join,
+        allow_participant_camera=request.allow_participant_camera,
+        allow_participant_microphone=request.allow_participant_microphone,
         screen_share_policy=screen_share_policy,
     )
     db.add(scheduled)
@@ -360,6 +372,14 @@ async def update_scheduled_conference(
         scheduled.microphone_on_join = request.microphone_on_join
         if room:
             room.microphone_on_join = request.microphone_on_join
+    if request.allow_participant_camera is not None:
+        scheduled.allow_participant_camera = request.allow_participant_camera
+        if room:
+            room.allow_participant_camera = request.allow_participant_camera
+    if request.allow_participant_microphone is not None:
+        scheduled.allow_participant_microphone = request.allow_participant_microphone
+        if room:
+            room.allow_participant_microphone = request.allow_participant_microphone
     if request.screen_share_policy is not None:
         policy = _policy(request.screen_share_policy)
         scheduled.screen_share_policy = policy

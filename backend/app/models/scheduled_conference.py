@@ -29,6 +29,8 @@ class ScheduledConference(Base):
     status = Column(SQLEnum(ConferenceStatus), default=ConferenceStatus.scheduled, nullable=False)
     camera_on_join = Column(Boolean, default=True, nullable=False)
     microphone_on_join = Column(Boolean, default=True, nullable=False)
+    allow_participant_camera = Column(Boolean, default=True, nullable=False)
+    allow_participant_microphone = Column(Boolean, default=True, nullable=False)
     screen_share_policy = Column(String(32), default=SCREEN_SHARE_EVERYONE, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

@@ -22,7 +22,7 @@ class RegisterRequest(BaseModel):
 class UserResponse(BaseModel):
     id: str
     username: str
-    email: EmailStr
+    email: str
     created_at: Optional[str] = None
 
 

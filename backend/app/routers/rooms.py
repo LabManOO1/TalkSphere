@@ -31,6 +31,8 @@ class CreateRoomRequest(BaseModel):
     title: str = Field(min_length=1, max_length=255)
     camera_on_join: bool = True
     microphone_on_join: bool = True
+    allow_participant_camera: bool = True
+    allow_participant_microphone: bool = True
     screen_share_policy: str = SCREEN_SHARE_EVERYONE
 
 
@@ -45,6 +47,8 @@ class RoomResponse(BaseModel):
     participants_count: int = 0
     camera_on_join: bool = True
     microphone_on_join: bool = True
+    allow_participant_camera: bool = True
+    allow_participant_microphone: bool = True
     screen_share_policy: str = SCREEN_SHARE_EVERYONE
 
 
@@ -78,6 +82,8 @@ def _room_response(room: Room, participants: list[dict] | None = None) -> RoomRe
         participants_count=len(participants),
         camera_on_join=bool(room.camera_on_join),
         microphone_on_join=bool(room.microphone_on_join),
+        allow_participant_camera=bool(room.allow_participant_camera),
+        allow_participant_microphone=bool(room.allow_participant_microphone),
         screen_share_policy=room.screen_share_policy or SCREEN_SHARE_EVERYONE,
     )
 
@@ -112,6 +118,8 @@ async def create_room(
         created_by=current_user.id,
         camera_on_join=request.camera_on_join,
         microphone_on_join=request.microphone_on_join,
+        allow_participant_camera=request.allow_participant_camera,
+        allow_participant_microphone=request.allow_participant_microphone,
         screen_share_policy=_validate_policy(request.screen_share_policy),
     )
     db.add(room)
@@ -217,6 +225,20 @@ async def update_participant_status(
         raise HTTPException(status_code=404, detail="Комната не найдена")
     if room.status != RoomStatus.active:
         raise HTTPException(status_code=400, detail="Комната не активна")
+
+    is_creator = room.created_by == current_user.id
+
+    if request.is_video_off is False and not room.allow_participant_camera and not is_creator:
+        raise HTTPException(
+            status_code=403,
+            detail="Организатор запретил участникам включать камеру",
+        )
+
+    if request.is_muted is False and not room.allow_participant_microphone and not is_creator:
+        raise HTTPException(
+            status_code=403,
+            detail="Организатор запретил участникам включать микрофон",
+        )
 
     requested_screen = request.is_screen_sharing
     if (

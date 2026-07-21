@@ -234,6 +234,14 @@ function Conference() {
   const [isJoined, setIsJoined] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
 
+  const isRoomCreator =
+    room?.created_by != null &&
+    currentUserId != null &&
+    String(room.created_by) === String(currentUserId);
+  const canUseCamera = room?.allow_participant_camera !== false || isRoomCreator;
+  const canUseMicrophone =
+    room?.allow_participant_microphone !== false || isRoomCreator;
+
   const clientIdRef = useRef(createClientId());
   const wsRef = useRef(null);
   const chatWsRef = useRef(null);
@@ -256,7 +264,7 @@ function Conference() {
   const joinedRef = useRef(false);
   const participantPollRef = useRef(null);
   const chatOpenRef = useRef(false);
-  const chatMessagesEndRef = useRef(null);
+  const chatMessagesRef = useRef(null);
 
   useEffect(() => {
     const previousBodyOverflow = document.body.style.overflow;
@@ -281,10 +289,8 @@ function Conference() {
 
     setUnreadChatCount(0);
     window.requestAnimationFrame(() => {
-      chatMessagesEndRef.current?.scrollIntoView({
-        behavior: "smooth",
-        block: "end",
-      });
+      const container = chatMessagesRef.current;
+      if (container) container.scrollTop = container.scrollHeight;
     });
   }, [chatOpen, chatMessages.length]);
 
@@ -758,9 +764,24 @@ function Conference() {
       }
 
       if (message.type === "permission_denied") {
-        if (message.permission === "screen_share") {
-          setError(message.detail || "Демонстрация экрана запрещена организатором");
-          if (screenTrackRef.current) void stopScreenShare();
+        setError(message.detail || "Действие запрещено организатором");
+
+        if (message.permission === "screen_share" && screenTrackRef.current) {
+          void stopScreenShare();
+        }
+
+        if (message.permission === "camera") {
+          const videoTrack = cameraTrackRef.current;
+          if (videoTrack) videoTrack.enabled = false;
+          cameraEnabledRef.current = false;
+          setCameraEnabled(false);
+        }
+
+        if (message.permission === "microphone") {
+          const audioTrack = localStreamRef.current?.getAudioTracks()[0];
+          if (audioTrack) audioTrack.enabled = false;
+          micEnabledRef.current = false;
+          setMicEnabled(false);
         }
         return;
       }
@@ -772,6 +793,10 @@ function Conference() {
           camera_on_join: settings.cameraOnJoin ?? current?.camera_on_join,
           microphone_on_join:
             settings.microphoneOnJoin ?? current?.microphone_on_join,
+          allow_participant_camera:
+            settings.allowParticipantCamera ?? current?.allow_participant_camera,
+          allow_participant_microphone:
+            settings.allowParticipantMicrophone ?? current?.allow_participant_microphone,
           screen_share_policy:
             settings.screenSharePolicy ?? current?.screen_share_policy,
           created_by: settings.createdBy ?? current?.created_by,
@@ -960,37 +985,40 @@ function Conference() {
     ],
   );
 
-  const acquireInitialMedia = useCallback(async () => {
+  const acquireInitialMedia = useCallback(async ({ video, audio }) => {
+    if (!video && !audio) return new MediaStream();
+
     try {
-      return await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: true,
-      });
+      return await navigator.mediaDevices.getUserMedia({ video, audio });
     } catch (combinedError) {
       const stream = new MediaStream();
 
-      try {
-        const videoStream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-          audio: false,
-        });
-        videoStream.getVideoTracks().forEach((track) => stream.addTrack(track));
-      } catch (videoError) {
-        console.warn("Камера недоступна", videoError);
+      if (video) {
+        try {
+          const videoStream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: false,
+          });
+          videoStream.getVideoTracks().forEach((track) => stream.addTrack(track));
+        } catch (videoError) {
+          console.warn("Камера недоступна", videoError);
+        }
       }
 
-      try {
-        const audioStream = await navigator.mediaDevices.getUserMedia({
-          video: false,
-          audio: true,
-        });
-        audioStream.getAudioTracks().forEach((track) => stream.addTrack(track));
-      } catch (audioError) {
-        console.warn("Микрофон недоступен", audioError);
+      if (audio) {
+        try {
+          const audioStream = await navigator.mediaDevices.getUserMedia({
+            video: false,
+            audio: true,
+          });
+          audioStream.getAudioTracks().forEach((track) => stream.addTrack(track));
+        } catch (audioError) {
+          console.warn("Микрофон недоступен", audioError);
+        }
       }
 
       if (stream.getTracks().length === 0) {
-        console.warn("Камера и микрофон недоступны", combinedError);
+        console.warn("Разрешённые устройства недоступны", combinedError);
       }
 
       return stream;
@@ -1049,7 +1077,19 @@ function Conference() {
 
         setRoom(roomResponse.data);
 
-        const mediaStream = await acquireInitialMedia();
+        const creator =
+          roomResponse.data?.created_by != null &&
+          currentUserId != null &&
+          String(roomResponse.data.created_by) === String(currentUserId);
+        const cameraAllowed =
+          roomResponse.data?.allow_participant_camera !== false || creator;
+        const microphoneAllowed =
+          roomResponse.data?.allow_participant_microphone !== false || creator;
+
+        const mediaStream = await acquireInitialMedia({
+          video: cameraAllowed,
+          audio: microphoneAllowed,
+        });
         if (cancelled) {
           mediaStream.getTracks().forEach((track) => track.stop());
           return;
@@ -1058,9 +1098,11 @@ function Conference() {
         const hasMicrophone = mediaStream.getAudioTracks().length > 0;
         const hasCamera = mediaStream.getVideoTracks().length > 0;
         const microphoneStartsOn =
-          hasMicrophone && roomResponse.data?.microphone_on_join !== false;
+          microphoneAllowed &&
+          hasMicrophone &&
+          roomResponse.data?.microphone_on_join !== false;
         const cameraStartsOn =
-          hasCamera && roomResponse.data?.camera_on_join !== false;
+          cameraAllowed && hasCamera && roomResponse.data?.camera_on_join !== false;
 
         mediaStream.getAudioTracks().forEach((track) => {
           track.enabled = microphoneStartsOn;
@@ -1096,6 +1138,7 @@ function Conference() {
   }, [
     acquireInitialMedia,
     authLoading,
+    currentUserId,
     inviteCode,
     isAuthenticated,
     navigate,
@@ -1298,6 +1341,10 @@ function Conference() {
   ]);
 
   const toggleMicrophone = async () => {
+    if (!canUseMicrophone) {
+      setError("Организатор запретил участникам включать микрофон");
+      return;
+    }
     if (microphoneActionRef.current) return;
     microphoneActionRef.current = true;
     setError("");
@@ -1359,6 +1406,10 @@ function Conference() {
   };
 
   const toggleCamera = async () => {
+    if (!canUseCamera) {
+      setError("Организатор запретил участникам включать камеру");
+      return;
+    }
     if (isSharingRef.current || cameraActionRef.current) return;
     cameraActionRef.current = true;
     setError("");
@@ -1444,10 +1495,7 @@ function Conference() {
   }, [broadcastMediaStatus, cameraEnabled, updateStatusOnServer]);
 
   const canShareScreen =
-    room?.screen_share_policy !== "creator_only" ||
-    (room?.created_by != null &&
-      currentUserId != null &&
-      String(room.created_by) === String(currentUserId));
+    room?.screen_share_policy !== "creator_only" || isRoomCreator;
 
   const toggleScreenShare = async () => {
     if (!canShareScreen) {
@@ -1757,11 +1805,25 @@ function Conference() {
                   !micEnabled ? styles.prejoinControlOff : ""
                 }`}
                 onClick={(event) => handleControlClick(event, toggleMicrophone)}
+                disabled={!canUseMicrophone}
+                title={!canUseMicrophone ? "Микрофон запрещён организатором" : undefined}
                 aria-pressed={micEnabled}
-                aria-label={micEnabled ? "Выключить микрофон" : "Включить микрофон"}
+                aria-label={
+                  !canUseMicrophone
+                    ? "Микрофон запрещён организатором"
+                    : micEnabled
+                      ? "Выключить микрофон"
+                      : "Включить микрофон"
+                }
               >
                 <MicIcon off={!micEnabled} />
-                <span>{micEnabled ? "Микрофон включён" : "Микрофон выключен"}</span>
+                <span>
+                  {!canUseMicrophone
+                    ? "Микрофон запрещён"
+                    : micEnabled
+                      ? "Микрофон включён"
+                      : "Микрофон выключен"}
+                </span>
               </button>
 
               <button
@@ -1770,11 +1832,25 @@ function Conference() {
                   !cameraEnabled ? styles.prejoinControlOff : ""
                 }`}
                 onClick={(event) => handleControlClick(event, toggleCamera)}
+                disabled={!canUseCamera}
+                title={!canUseCamera ? "Камера запрещена организатором" : undefined}
                 aria-pressed={cameraEnabled}
-                aria-label={cameraEnabled ? "Выключить камеру" : "Включить камеру"}
+                aria-label={
+                  !canUseCamera
+                    ? "Камера запрещена организатором"
+                    : cameraEnabled
+                      ? "Выключить камеру"
+                      : "Включить камеру"
+                }
               >
                 <CameraIcon off={!cameraEnabled} />
-                <span>{cameraEnabled ? "Камера включена" : "Камера выключена"}</span>
+                <span>
+                  {!canUseCamera
+                    ? "Камера запрещена"
+                    : cameraEnabled
+                      ? "Камера включена"
+                      : "Камера выключена"}
+                </span>
               </button>
             </div>
           </section>
@@ -1799,7 +1875,13 @@ function Conference() {
                 </span>
                 <p>
                   <strong>Микрофон</strong>
-                  <small>{micEnabled ? "Будет включён при входе" : "Вход без звука"}</small>
+                  <small>
+                    {!canUseMicrophone
+                      ? "Запрещён организатором"
+                      : micEnabled
+                        ? "Будет включён при входе"
+                        : "Вход без звука"}
+                  </small>
                 </p>
               </div>
 
@@ -1809,7 +1891,13 @@ function Conference() {
                 </span>
                 <p>
                   <strong>Камера</strong>
-                  <small>{cameraEnabled ? "Будет включена при входе" : "Вход без видео"}</small>
+                  <small>
+                    {!canUseCamera
+                      ? "Запрещена организатором"
+                      : cameraEnabled
+                        ? "Будет включена при входе"
+                        : "Вход без видео"}
+                  </small>
                 </p>
               </div>
             </div>
@@ -1992,6 +2080,7 @@ function Conference() {
           </div>
 
           <div
+            ref={chatMessagesRef}
             className={styles.chatMessages}
             role="log"
             aria-live="polite"
@@ -2033,7 +2122,6 @@ function Conference() {
                 </article>
               ))
             )}
-            <div ref={chatMessagesEndRef} aria-hidden="true" />
           </div>
 
           <form className={styles.chatForm} onSubmit={sendChatMessage}>
@@ -2066,21 +2154,40 @@ function Conference() {
           type="button"
           className={!micEnabled ? styles.controlOff : ""}
           onClick={(event) => handleControlClick(event, toggleMicrophone)}
-          aria-label={micEnabled ? "Выключить микрофон" : "Включить микрофон"}
+          disabled={!canUseMicrophone}
+          title={!canUseMicrophone ? "Микрофон запрещён организатором" : undefined}
+          aria-label={
+            !canUseMicrophone
+              ? "Микрофон запрещён организатором"
+              : micEnabled
+                ? "Выключить микрофон"
+                : "Включить микрофон"
+          }
         >
           <MicIcon off={!micEnabled} />
-          <span>{micEnabled ? "Микрофон" : "Без звука"}</span>
+          <span>
+            {!canUseMicrophone ? "Микрофон запрещён" : micEnabled ? "Микрофон" : "Без звука"}
+          </span>
         </button>
 
         <button
           type="button"
           className={!cameraEnabled ? styles.controlOff : ""}
           onClick={(event) => handleControlClick(event, toggleCamera)}
-          disabled={isSharing}
-          aria-label={cameraEnabled ? "Выключить камеру" : "Включить камеру"}
+          disabled={isSharing || !canUseCamera}
+          title={!canUseCamera ? "Камера запрещена организатором" : undefined}
+          aria-label={
+            !canUseCamera
+              ? "Камера запрещена организатором"
+              : cameraEnabled
+                ? "Выключить камеру"
+                : "Включить камеру"
+          }
         >
           <CameraIcon off={!cameraEnabled} />
-          <span>{cameraEnabled ? "Камера" : "Без видео"}</span>
+          <span>
+            {!canUseCamera ? "Камера запрещена" : cameraEnabled ? "Камера" : "Без видео"}
+          </span>
         </button>
 
         <button

@@ -35,6 +35,8 @@ class Room(Base):
     status = Column(SQLEnum(RoomStatus), default=RoomStatus.active, nullable=False)
     camera_on_join = Column(Boolean, default=True, nullable=False)
     microphone_on_join = Column(Boolean, default=True, nullable=False)
+    allow_participant_camera = Column(Boolean, default=True, nullable=False)
+    allow_participant_microphone = Column(Boolean, default=True, nullable=False)
     screen_share_policy = Column(
         String(32),
         default=SCREEN_SHARE_EVERYONE,

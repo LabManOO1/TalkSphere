@@ -1533,3 +1533,43 @@
   cursor: not-allowed;
   opacity: 0.42;
 }
+
+/* Панели чата/участников всегда накладываются поверх сцены и не участвуют
+   в расчёте размеров видео. Это предотвращает смещение аватара и презентации. */
+.participantsPanel,
+.chatPanel {
+  contain: layout paint;
+  transform: translate3d(calc(100% + 32px), 0, 0);
+  will-change: transform, opacity;
+}
+
+.panelOpen {
+  transform: translate3d(0, 0, 0);
+}
+
+.chatMessages {
+  overflow-anchor: none;
+  scroll-behavior: auto;
+}
+
+.prejoinControl:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+  transform: none;
+}
+
+.prejoinControl:disabled:hover {
+  transform: none;
+  background: rgba(164, 0, 0, 0.3);
+}
+
+@media (max-width: 760px) {
+  .participantsPanel,
+  .chatPanel {
+    transform: translate3d(calc(100% + 16px), 0, 0);
+  }
+
+  .panelOpen {
+    transform: translate3d(0, 0, 0);
+  }
+}

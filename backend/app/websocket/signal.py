@@ -108,6 +108,8 @@ async def signal_endpoint(websocket: WebSocket, invite_code: str, token: Optiona
         room_created_by = room.created_by
         camera_on_join = bool(room.camera_on_join)
         microphone_on_join = bool(room.microphone_on_join)
+        allow_participant_camera = bool(room.allow_participant_camera)
+        allow_participant_microphone = bool(room.allow_participant_microphone)
         screen_share_policy = room.screen_share_policy
         scheduled = db.query(ScheduledConference).filter(
             ScheduledConference.room_id == room.id,
@@ -117,6 +119,10 @@ async def signal_endpoint(websocket: WebSocket, invite_code: str, token: Optiona
             db.commit()
     finally:
         db.close()
+
+    is_creator = room_created_by == user.id
+    camera_allowed = is_creator or allow_participant_camera
+    microphone_allowed = is_creator or allow_participant_microphone
 
     await websocket.accept()
     room_clients = rooms.setdefault(invite_code, [])
@@ -129,8 +135,8 @@ async def signal_endpoint(websocket: WebSocket, invite_code: str, token: Optiona
         "user_id": user.id,
         "username": user.username,
         "client_id": None,
-        "is_muted": not microphone_on_join,
-        "is_video_off": not camera_on_join,
+        "is_muted": not (microphone_on_join and microphone_allowed),
+        "is_video_off": not (camera_on_join and camera_allowed),
         "is_screen_sharing": False,
     }
     room_clients.append(current_client)
@@ -149,8 +155,8 @@ async def signal_endpoint(websocket: WebSocket, invite_code: str, token: Optiona
             room_id,
             user.id,
             ParticipantRole.speaker,
-            is_muted=not microphone_on_join,
-            is_video_off=not camera_on_join,
+            is_muted=not (microphone_on_join and microphone_allowed),
+            is_video_off=not (camera_on_join and camera_allowed),
             is_screen_sharing=False,
         )
     finally:
@@ -164,8 +170,11 @@ async def signal_endpoint(websocket: WebSocket, invite_code: str, token: Optiona
                 "roomSettings": {
                     "cameraOnJoin": camera_on_join,
                     "microphoneOnJoin": microphone_on_join,
+                    "allowParticipantCamera": allow_participant_camera,
+                    "allowParticipantMicrophone": allow_participant_microphone,
                     "screenSharePolicy": screen_share_policy,
                     "createdBy": str(room_created_by),
+                    "isCreator": is_creator,
                 },
             }
         )
@@ -208,11 +217,38 @@ async def signal_endpoint(websocket: WebSocket, invite_code: str, token: Optiona
                 payload["target_client_id"] = str(target_client_id)
 
             if message_type == "media-status":
+                requested_muted = bool(payload.get("isMuted", payload.get("is_muted", False)))
+                requested_video_off = bool(payload.get("isVideoOff", payload.get("is_video_off", False)))
                 requested_screen_share = bool(payload.get("isScreenSharing", payload.get("is_screen_sharing", False)))
+
+                if not microphone_allowed and not requested_muted:
+                    requested_muted = True
+                    await websocket.send_text(
+                        json.dumps(
+                            {
+                                "type": "permission_denied",
+                                "permission": "microphone",
+                                "detail": "Организатор запретил участникам включать микрофон",
+                            }
+                        )
+                    )
+
+                if not camera_allowed and not requested_video_off:
+                    requested_video_off = True
+                    await websocket.send_text(
+                        json.dumps(
+                            {
+                                "type": "permission_denied",
+                                "permission": "camera",
+                                "detail": "Организатор запретил участникам включать камеру",
+                            }
+                        )
+                    )
+
                 if (
                     requested_screen_share
                     and screen_share_policy == SCREEN_SHARE_CREATOR_ONLY
-                    and room_created_by != user.id
+                    and not is_creator
                 ):
                     requested_screen_share = False
                     await websocket.send_text(
@@ -225,8 +261,8 @@ async def signal_endpoint(websocket: WebSocket, invite_code: str, token: Optiona
                         )
                     )
 
-                current_client["is_muted"] = bool(payload.get("isMuted", payload.get("is_muted", False)))
-                current_client["is_video_off"] = bool(payload.get("isVideoOff", payload.get("is_video_off", False)))
+                current_client["is_muted"] = requested_muted
+                current_client["is_video_off"] = requested_video_off
                 current_client["is_screen_sharing"] = requested_screen_share
                 payload.update(
                     {
