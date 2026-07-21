@@ -351,3 +351,85 @@
     padding: 24px 20px;
   }
 }
+
+.editButton {
+  min-height: 44px;
+  padding: 0 18px;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font-family: "Manrope", sans-serif;
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+  transition: background 0.2s ease, transform 0.2s ease;
+
+  &:hover { background: rgba(255, 255, 255, 0.24); transform: translateY(-1px); }
+}
+
+.success {
+  margin: 18px 0 0;
+  color: #267544;
+  font-family: "Manrope", sans-serif;
+  font-weight: 700;
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  padding: 20px;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.58);
+  backdrop-filter: blur(5px);
+}
+
+.dialog {
+  position: relative;
+  width: min(500px, 100%);
+  padding: 34px;
+  border-radius: 26px;
+  background: #fff;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.35);
+
+  h2 { margin: 0 44px 24px 0; font-family: "Manrope", sans-serif; font-size: 27px; }
+}
+
+.closeButton {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: #f1f1f1;
+  color: #350002;
+  font-size: 28px;
+}
+
+.form {
+  display: grid;
+  gap: 17px;
+
+  label { display: grid; gap: 7px; color: #5b5b5b; font-family: "Manrope", sans-serif; font-size: 13px; font-weight: 700; }
+  input { min-height: 50px; padding: 0 15px; border: 1.5px solid #a90007; border-radius: 15px; outline: none; font: inherit; font-size: 15px; }
+  input:focus { box-shadow: 0 0 0 3px rgba(169, 0, 7, 0.12); }
+  > button { min-height: 52px; border-radius: 16px; background: linear-gradient(100deg, #b60008, #570003); color: #fff; font-family: "Manrope", sans-serif; font-weight: 800; }
+  > button:disabled { opacity: 0.6; cursor: wait; }
+}
+
+.formError { margin: 0; color: #a10005; font-family: "Manrope", sans-serif; font-size: 13px; }
+
+@media (max-width: 760px) {
+  .profileHero { grid-template-columns: auto 1fr; padding: 30px 24px; }
+  .editButton { grid-column: 1 / -1; width: 100%; }
+  .dialog { padding: 30px 20px 22px; }
+}
+
+@media (max-width: 480px) {
+  .profileHero { grid-template-columns: 1fr; text-align: center; }
+  .avatar { margin: 0 auto; }
+  .contentGrid { padding: 28px 18px 34px; }
+}

@@ -3,42 +3,25 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
-from app.auth import get_current_user_ws
-from app.database import SessionLocal
-from app.models.participant import ParticipantRole
-from app.models.room import Room, RoomStatus
-from app.services.participant_service import ParticipantService
-
+from ..auth import get_current_user_ws
+from ..database import SessionLocal
+from ..models.participant import ParticipantRole
+from ..models.room import Room, RoomStatus, SCREEN_SHARE_CREATOR_ONLY
+from ..models.scheduled_conference import ConferenceStatus, ScheduledConference
+from ..services.participant_service import ParticipantService
 
 signal_router = APIRouter()
-
-# {
-#     "INVITE_CODE": [
-#         {
-#             "ws": WebSocket,
-#             "user_id": UUID,
-#             "username": str,
-#             "client_id": str | None,
-#             "is_muted": bool,
-#             "is_video_off": bool,
-#             "is_screen_sharing": bool,
-#         }
-#     ]
-# }
 rooms: Dict[str, List[Dict[str, Any]]] = {}
 
 
 async def send_payload(client: Dict[str, Any], payload: dict) -> bool:
     websocket = client.get("ws")
-
     if websocket is None:
         return False
-
     try:
         await websocket.send_text(json.dumps(payload))
         return True
-    except Exception as error:
-        print(f"Ошибка отправки WebSocket-сообщения: {error}")
+    except Exception:
         return False
 
 
@@ -48,47 +31,42 @@ async def broadcast(
     exclude_ws: Optional[WebSocket] = None,
     target_client_id: Optional[str] = None,
     target_user_id: Optional[str] = None,
-):
-    clients = list(rooms.get(invite_code, []))
-
-    for client in clients:
+) -> None:
+    alive = []
+    for client in list(rooms.get(invite_code, [])):
         client_ws = client.get("ws")
-        client_id = client.get("client_id")
-        client_user_id = str(client.get("user_id"))
-
+        if client_ws is None:
+            continue
         if exclude_ws is not None and client_ws is exclude_ws:
+            alive.append(client)
             continue
-
-        if target_client_id is not None and str(client_id) != str(target_client_id):
+        if target_client_id is not None and str(client.get("client_id")) != str(target_client_id):
+            alive.append(client)
             continue
-
-        if target_user_id is not None and client_user_id != str(target_user_id):
+        if target_user_id is not None and str(client.get("user_id")) != str(target_user_id):
+            alive.append(client)
             continue
+        if await send_payload(client, payload):
+            alive.append(client)
 
-        await send_payload(client, payload)
-
-
-def remove_connection(invite_code: str, websocket: WebSocket):
-    current_clients = rooms.get(invite_code, [])
-
-    remaining_clients = [
-        client
-        for client in current_clients
-        if client.get("ws") is not websocket
-    ]
-
-    if remaining_clients:
-        rooms[invite_code] = remaining_clients
+    if alive:
+        rooms[invite_code] = alive
     else:
         rooms.pop(invite_code, None)
 
-    return remaining_clients
+
+def remove_connection(invite_code: str, websocket: WebSocket):
+    remaining = [client for client in rooms.get(invite_code, []) if client.get("ws") is not websocket]
+    if remaining:
+        rooms[invite_code] = remaining
+    else:
+        rooms.pop(invite_code, None)
+    return remaining
 
 
 def serialize_participant(client: Dict[str, Any]) -> Dict[str, Any]:
     user_id = str(client.get("user_id"))
     client_id = client.get("client_id")
-
     return {
         "clientId": client_id,
         "client_id": client_id,
@@ -105,16 +83,8 @@ def serialize_participant(client: Dict[str, Any]) -> Dict[str, Any]:
 
 
 @signal_router.websocket("/ws/signal/{invite_code}")
-async def signal_endpoint(
-    websocket: WebSocket,
-    invite_code: str,
-    token: Optional[str] = None,
-):
-    user = None
-    room_id = None
-    connection_registered = False
-    current_client: Optional[Dict[str, Any]] = None
-
+async def signal_endpoint(websocket: WebSocket, invite_code: str, token: Optional[str] = None):
+    invite_code = invite_code.upper()
     if not token:
         await websocket.close(code=1008, reason="Token required")
         return
@@ -126,48 +96,32 @@ async def signal_endpoint(
         return
 
     db = SessionLocal()
-
     try:
-        room = (
-            db.query(Room)
-            .filter(Room.invite_code == invite_code)
-            .first()
-        )
-
+        room = db.query(Room).filter(Room.invite_code == invite_code).first()
         if room is None:
             await websocket.close(code=1008, reason="Комната не найдена")
             return
-
         if room.status != RoomStatus.active:
             await websocket.close(code=1008, reason="Конференция уже завершена")
             return
-
         room_id = room.id
-    except Exception as error:
-        print(f"Ошибка поиска комнаты: {error}")
-        await websocket.close(code=1011, reason="Ошибка при поиске комнаты")
-        return
+        room_created_by = room.created_by
+        camera_on_join = bool(room.camera_on_join)
+        microphone_on_join = bool(room.microphone_on_join)
+        screen_share_policy = room.screen_share_policy
+        scheduled = db.query(ScheduledConference).filter(
+            ScheduledConference.room_id == room.id,
+        ).first()
+        if scheduled and scheduled.status == ConferenceStatus.scheduled:
+            scheduled.status = ConferenceStatus.active
+            db.commit()
     finally:
         db.close()
 
     await websocket.accept()
-
     room_clients = rooms.setdefault(invite_code, [])
-
-    # Новое подключение той же учетной записи заменяет старое, но перед
-    # закрытием старый клиент получает понятное событие для интерфейса.
-    old_connections = [
-        client
-        for client in room_clients
-        if str(client.get("user_id")) == str(user.id)
-    ]
-
-    room_clients[:] = [
-        client
-        for client in room_clients
-        if str(client.get("user_id")) != str(user.id)
-    ]
-
+    old_connections = [client for client in room_clients if str(client.get("user_id")) == str(user.id)]
+    room_clients[:] = [client for client in room_clients if str(client.get("user_id")) != str(user.id)]
     existing_participants = [serialize_participant(client) for client in room_clients]
 
     current_client = {
@@ -175,45 +129,30 @@ async def signal_endpoint(
         "user_id": user.id,
         "username": user.username,
         "client_id": None,
-        "is_muted": False,
-        "is_video_off": False,
+        "is_muted": not microphone_on_join,
+        "is_video_off": not camera_on_join,
         "is_screen_sharing": False,
     }
-
     room_clients.append(current_client)
-    connection_registered = True
 
-    # Новое соединение уже зарегистрировано, поэтому finally старого сокета
-    # увидит замену и не удалит участника из комнаты/БД.
     for old_client in old_connections:
         try:
-            await send_payload(
-                old_client,
-                {
-                    "type": "duplicate-session",
-                    "userId": str(user.id),
-                    "user_id": str(user.id),
-                    "username": user.username,
-                },
-            )
-            await old_client["ws"].close(
-                code=4001,
-                reason="Открыто новое подключение",
-            )
+            await send_payload(old_client, {"type": "duplicate-session", "userId": str(user.id), "username": user.username})
+            await old_client["ws"].close(code=4001, reason="Открыто новое подключение")
         except Exception:
             pass
 
     db = SessionLocal()
-
     try:
         ParticipantService.add_participant(
             db,
-            room_id=room_id,
-            user_id=user.id,
-            role=ParticipantRole.speaker,
+            room_id,
+            user.id,
+            ParticipantRole.speaker,
+            is_muted=not microphone_on_join,
+            is_video_off=not camera_on_join,
+            is_screen_sharing=False,
         )
-    except Exception as error:
-        print(f"Ошибка сохранения участника: {error}")
     finally:
         db.close()
 
@@ -222,129 +161,130 @@ async def signal_endpoint(
             {
                 "type": "room_state",
                 "participants": existing_participants,
+                "roomSettings": {
+                    "cameraOnJoin": camera_on_join,
+                    "microphoneOnJoin": microphone_on_join,
+                    "screenSharePolicy": screen_share_policy,
+                    "createdBy": str(room_created_by),
+                },
             }
         )
     )
 
     try:
         while True:
-            raw_data = await websocket.receive_text()
-
             try:
-                payload = json.loads(raw_data)
+                payload = json.loads(await websocket.receive_text())
             except json.JSONDecodeError:
                 continue
-
             if not isinstance(payload, dict):
                 continue
 
-            incoming_client_id = (
-                payload.get("from")
-                or payload.get("clientId")
-                or payload.get("client_id")
-            )
+            message_type = payload.get("type")
+            if message_type in {"chat", "chat-message", "chat_message"}:
+                continue
 
+            incoming_client_id = payload.get("from") or payload.get("clientId") or payload.get("client_id")
             if incoming_client_id:
                 current_client["client_id"] = str(incoming_client_id)
-
             client_id = current_client.get("client_id") or str(user.id)
-            message_type = payload.get("type")
 
-            # Сервер не доверяет идентификаторам пользователя из браузера и
-            # всегда записывает канонические значения в обоих форматах полей.
-            payload["from"] = client_id
-            payload["clientId"] = client_id
-            payload["client_id"] = client_id
-            payload["userId"] = str(user.id)
-            payload["user_id"] = str(user.id)
-            payload["from_user_id"] = str(user.id)
-            payload["username"] = user.username
-            payload["from_username"] = user.username
-
+            payload.update(
+                {
+                    "from": client_id,
+                    "clientId": client_id,
+                    "client_id": client_id,
+                    "userId": str(user.id),
+                    "user_id": str(user.id),
+                    "from_user_id": str(user.id),
+                    "username": user.username,
+                    "from_username": user.username,
+                }
+            )
             target_client_id = payload.get("target") or payload.get("target_client_id")
             target_user_id = payload.get("target_user_id")
-
             if target_client_id is not None:
                 payload["target"] = str(target_client_id)
                 payload["target_client_id"] = str(target_client_id)
 
             if message_type == "media-status":
-                current_client["is_muted"] = bool(
-                    payload.get("isMuted", payload.get("is_muted", False))
-                )
-                current_client["is_video_off"] = bool(
-                    payload.get("isVideoOff", payload.get("is_video_off", False))
-                )
-                current_client["is_screen_sharing"] = bool(
-                    payload.get(
-                        "isScreenSharing",
-                        payload.get("is_screen_sharing", False),
+                requested_screen_share = bool(payload.get("isScreenSharing", payload.get("is_screen_sharing", False)))
+                if (
+                    requested_screen_share
+                    and screen_share_policy == SCREEN_SHARE_CREATOR_ONLY
+                    and room_created_by != user.id
+                ):
+                    requested_screen_share = False
+                    await websocket.send_text(
+                        json.dumps(
+                            {
+                                "type": "permission_denied",
+                                "permission": "screen_share",
+                                "detail": "Демонстрация экрана разрешена только создателю встречи",
+                            }
+                        )
                     )
+
+                current_client["is_muted"] = bool(payload.get("isMuted", payload.get("is_muted", False)))
+                current_client["is_video_off"] = bool(payload.get("isVideoOff", payload.get("is_video_off", False)))
+                current_client["is_screen_sharing"] = requested_screen_share
+                payload.update(
+                    {
+                        "isMuted": current_client["is_muted"],
+                        "is_muted": current_client["is_muted"],
+                        "isVideoOff": current_client["is_video_off"],
+                        "is_video_off": current_client["is_video_off"],
+                        "isScreenSharing": requested_screen_share,
+                        "is_screen_sharing": requested_screen_share,
+                    }
                 )
 
-                payload["isMuted"] = current_client["is_muted"]
-                payload["is_muted"] = current_client["is_muted"]
-                payload["isVideoOff"] = current_client["is_video_off"]
-                payload["is_video_off"] = current_client["is_video_off"]
-                payload["isScreenSharing"] = current_client["is_screen_sharing"]
-                payload["is_screen_sharing"] = current_client["is_screen_sharing"]
+                db = SessionLocal()
+                try:
+                    ParticipantService.update_status(
+                        db,
+                        room_id,
+                        user.id,
+                        is_muted=current_client["is_muted"],
+                        is_video_off=current_client["is_video_off"],
+                        is_screen_sharing=requested_screen_share,
+                    )
+                finally:
+                    db.close()
 
             await broadcast(
                 invite_code,
                 payload,
                 exclude_ws=websocket,
-                target_client_id=(
-                    str(target_client_id) if target_client_id is not None else None
-                ),
-                target_user_id=(
-                    str(target_user_id) if target_user_id is not None else None
-                ),
+                target_client_id=str(target_client_id) if target_client_id is not None else None,
+                target_user_id=str(target_user_id) if target_user_id is not None else None,
             )
 
     except WebSocketDisconnect:
         pass
-    except Exception as error:
-        print(f"Ошибка WebSocket пользователя {user.username}: {error}")
+    except Exception as exc:
+        print(f"Ошибка WebSocket пользователя {user.username}: {exc}")
     finally:
-        if not connection_registered:
-            return
-
-        remaining_clients = remove_connection(invite_code, websocket)
-
-        same_user_still_connected = any(
-            str(client.get("user_id")) == str(user.id)
-            for client in remaining_clients
-        )
-
-        if same_user_still_connected:
+        remaining = remove_connection(invite_code, websocket)
+        if any(str(client.get("user_id")) == str(user.id) for client in remaining):
             return
 
         db = SessionLocal()
-
         try:
-            ParticipantService.remove_participant(
-                db,
-                room_id=room_id,
-                user_id=user.id,
-            )
-        except Exception as error:
-            print(f"Ошибка удаления участника: {error}")
+            ParticipantService.remove_participant(db, room_id, user.id)
         finally:
             db.close()
 
-        client_id = (
-            current_client.get("client_id")
-            if current_client is not None
-            else None
-        ) or str(user.id)
-
-        leave_payload = {
-            "type": "leave",
-            "from": client_id,
-            "clientId": client_id,
-            "client_id": client_id,
-            "userId": str(user.id),
-            "user_id": str(user.id),
-            "username": user.username,
-        }
-        await broadcast(invite_code, leave_payload)
+        client_id = current_client.get("client_id") or str(user.id)
+        await broadcast(
+            invite_code,
+            {
+                "type": "leave",
+                "from": client_id,
+                "clientId": client_id,
+                "client_id": client_id,
+                "userId": str(user.id),
+                "user_id": str(user.id),
+                "username": user.username,
+            },
+        )

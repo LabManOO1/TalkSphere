@@ -72,6 +72,15 @@ function Meetings() {
     setError("");
   };
 
+  const openSchedulePage = () => {
+    if (!isAuthenticated) {
+      sessionStorage.setItem("redirect_after_login", "/meetings/schedule");
+      navigate("/login", { state: { from: "/meetings/schedule" } });
+      return;
+    }
+    navigate("/meetings/schedule");
+  };
+
   const openCreateDialog = () => {
     setError("");
 
@@ -126,7 +135,7 @@ function Meetings() {
             <button
               type="button"
               className={`${styles.action} ${styles.secondaryAction}`}
-              onClick={() => navigate("/calendar")}
+              onClick={openSchedulePage}
             >
               <span className={styles.iconBox}>
                 <CalendarIcon />

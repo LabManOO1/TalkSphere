@@ -229,12 +229,14 @@ function Conference() {
   const [chatOpen, setChatOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState([]);
   const [chatDraft, setChatDraft] = useState("");
+  const [chatConnectionState, setChatConnectionState] = useState("disconnected");
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [isJoined, setIsJoined] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
 
   const clientIdRef = useRef(createClientId());
   const wsRef = useRef(null);
+  const chatWsRef = useRef(null);
   const localStreamRef = useRef(null);
   const cameraTrackRef = useRef(null);
   const screenTrackRef = useRef(null);
@@ -289,6 +291,7 @@ function Conference() {
   useEffect(() => {
     setChatMessages([]);
     setChatDraft("");
+    setChatConnectionState("disconnected");
     setUnreadChatCount(0);
     setChatOpen(false);
     chatOpenRef.current = false;
@@ -440,42 +443,111 @@ function Conference() {
     setParticipantsOpen((current) => !current);
   }, [closeChatPanel]);
 
-  const sendChatMessage = useCallback(
+  const handleChatSocketMessage = useCallback(
     (event) => {
-      event?.preventDefault();
-
-      const text = chatDraft.trim().slice(0, CHAT_MESSAGE_LIMIT);
-      if (!text) return;
-
-      if (wsRef.current?.readyState !== WebSocket.OPEN) {
-        setError("Чат недоступен: соединение с конференцией не установлено");
+      let message;
+      try {
+        message = JSON.parse(event.data);
+      } catch {
         return;
       }
 
-      const messageId = createClientId();
-      const sentAt = new Date().toISOString();
+      if (message.type === "history") {
+        const history = (message.messages || []).map((item) => ({
+          id: String(item.id),
+          userId: item.user_id,
+          username: item.username || "Участник",
+          text: String(item.content || "").slice(0, CHAT_MESSAGE_LIMIT),
+          sentAt: item.sent_at,
+          isOwn:
+            currentUserId != null &&
+            item.user_id != null &&
+            String(item.user_id) === String(currentUserId),
+        }));
+        setChatMessages(history.slice(-CHAT_HISTORY_LIMIT));
+        return;
+      }
 
-      appendChatMessage({
-        id: messageId,
-        userId: currentUserId,
-        username: currentUsername,
-        text,
-        sentAt,
-        isOwn: true,
-      });
+      if (message.type === "message") {
+        appendChatMessage({
+          id: message.id,
+          userId: message.user_id,
+          username: message.username,
+          text: message.content,
+          sentAt: message.sent_at,
+        });
+        return;
+      }
 
-      sendSignal({
-        type: "chat-message",
-        messageId,
-        message_id: messageId,
-        text,
-        sentAt,
-        sent_at: sentAt,
-      });
+      if (message.type === "message_deleted") {
+        setChatMessages((current) =>
+          current.filter((item) => item.id !== String(message.message_id)),
+        );
+        return;
+      }
+
+      if (message.type === "error" && message.detail) {
+        setError(message.detail);
+      }
+    },
+    [appendChatMessage, currentUserId],
+  );
+
+  const connectChat = useCallback(() => {
+    if (!token || !inviteCode) return;
+
+    const previousSocket = chatWsRef.current;
+    if (
+      previousSocket?.readyState === WebSocket.OPEN ||
+      previousSocket?.readyState === WebSocket.CONNECTING
+    ) {
+      return;
+    }
+
+    setChatConnectionState("connecting");
+    const socket = new WebSocket(
+      `${WS_URL}/ws/chat/${encodeURIComponent(inviteCode)}?token=${encodeURIComponent(token)}`,
+    );
+    chatWsRef.current = socket;
+
+    socket.onopen = () => {
+      if (chatWsRef.current === socket) setChatConnectionState("connected");
+    };
+    socket.onmessage = handleChatSocketMessage;
+    socket.onerror = () => {
+      if (chatWsRef.current === socket) setChatConnectionState("error");
+    };
+    socket.onclose = () => {
+      if (chatWsRef.current !== socket) return;
+      chatWsRef.current = null;
+      setChatConnectionState(isLeavingRef.current ? "disconnected" : "error");
+    };
+  }, [handleChatSocketMessage, inviteCode, token]);
+
+  const sendChatMessage = useCallback(
+    (event) => {
+      event?.preventDefault();
+      const text = chatDraft.trim().slice(0, CHAT_MESSAGE_LIMIT);
+      if (!text) return;
+
+      const socket = chatWsRef.current;
+      if (socket?.readyState !== WebSocket.OPEN) {
+        setError("Чат подключается. Попробуйте отправить сообщение ещё раз");
+        connectChat();
+        return;
+      }
+
+      socket.send(JSON.stringify({ type: "message", content: text }));
       setChatDraft("");
     },
-    [appendChatMessage, chatDraft, currentUserId, currentUsername, sendSignal],
+    [chatDraft, connectChat],
   );
+
+  const deleteChatMessage = useCallback((messageId) => {
+    const socket = chatWsRef.current;
+    if (socket?.readyState !== WebSocket.OPEN) return;
+    socket.send(JSON.stringify({ type: "delete_message", message_id: messageId }));
+  }, []);
 
   const handleChatKeyDown = useCallback(
     (event) => {
@@ -682,26 +754,29 @@ function Conference() {
       if (messageTarget && messageTarget !== clientIdRef.current) return;
 
       if (["chat-message", "chat_message", "chat"].includes(message.type)) {
-        const text = String(
-          message.text ?? message.message ?? message.content ?? "",
-        )
-          .trim()
-          .slice(0, CHAT_MESSAGE_LIMIT);
+        return;
+      }
 
-        if (!text) return;
-
-        appendChatMessage({
-          id: message.messageId ?? message.message_id ?? null,
-          userId: messageUserId,
-          username: messageUsername,
-          text,
-          sentAt: message.sentAt ?? message.sent_at ?? new Date().toISOString(),
-          isOwn: messageFrom === clientIdRef.current,
-        });
+      if (message.type === "permission_denied") {
+        if (message.permission === "screen_share") {
+          setError(message.detail || "Демонстрация экрана запрещена организатором");
+          if (screenTrackRef.current) void stopScreenShare();
+        }
         return;
       }
 
       if (message.type === "room_state") {
+        const settings = message.roomSettings || {};
+        setRoom((current) => ({
+          ...(current || {}),
+          camera_on_join: settings.cameraOnJoin ?? current?.camera_on_join,
+          microphone_on_join:
+            settings.microphoneOnJoin ?? current?.microphone_on_join,
+          screen_share_policy:
+            settings.screenSharePolicy ?? current?.screen_share_policy,
+          created_by: settings.createdBy ?? current?.created_by,
+        }));
+
         (message.participants || []).forEach((participant) => {
           const userId = participant.userId ?? participant.user_id ?? null;
           if (
@@ -982,18 +1057,22 @@ function Conference() {
 
         const hasMicrophone = mediaStream.getAudioTracks().length > 0;
         const hasCamera = mediaStream.getVideoTracks().length > 0;
+        const microphoneStartsOn =
+          hasMicrophone && roomResponse.data?.microphone_on_join !== false;
+        const cameraStartsOn =
+          hasCamera && roomResponse.data?.camera_on_join !== false;
 
         mediaStream.getAudioTracks().forEach((track) => {
-          track.enabled = hasMicrophone;
+          track.enabled = microphoneStartsOn;
         });
         mediaStream.getVideoTracks().forEach((track) => {
-          track.enabled = hasCamera;
+          track.enabled = cameraStartsOn;
         });
 
-        micEnabledRef.current = hasMicrophone;
-        cameraEnabledRef.current = hasCamera;
-        setMicEnabled(hasMicrophone);
-        setCameraEnabled(hasCamera);
+        micEnabledRef.current = microphoneStartsOn;
+        cameraEnabledRef.current = cameraStartsOn;
+        setMicEnabled(microphoneStartsOn);
+        setCameraEnabled(cameraStartsOn);
         localStreamRef.current = mediaStream;
         cameraTrackRef.current = mediaStream.getVideoTracks()[0] || null;
         setLocalPreview(new MediaStream(mediaStream.getTracks()));
@@ -1101,6 +1180,7 @@ function Conference() {
         setIsJoined(true);
         setIsJoining(false);
         setConnectionState("connected");
+        connectChat();
         sendSignal({ type: "join" });
         broadcastMediaStatus({
           isMuted: !micEnabledRef.current,
@@ -1129,6 +1209,9 @@ function Conference() {
         if (wsRef.current !== socket) return;
 
         wsRef.current = null;
+        chatWsRef.current?.close();
+        chatWsRef.current = null;
+        setChatConnectionState("disconnected");
         joinActionRef.current = false;
 
         if (participantPollRef.current) {
@@ -1158,6 +1241,7 @@ function Conference() {
   }, [
     broadcastMediaStatus,
     claimSessionLock,
+    connectChat,
     handleSignalMessage,
     inviteCode,
     releaseSessionLock,
@@ -1194,6 +1278,8 @@ function Conference() {
       joinedRef.current = false;
       wsRef.current?.close();
       wsRef.current = null;
+      chatWsRef.current?.close();
+      chatWsRef.current = null;
       closeConnections();
       stopMedia();
       releaseSessionLock();
@@ -1357,7 +1443,18 @@ function Conference() {
     await updateStatusOnServer({ is_screen_sharing: false });
   }, [broadcastMediaStatus, cameraEnabled, updateStatusOnServer]);
 
+  const canShareScreen =
+    room?.screen_share_policy !== "creator_only" ||
+    (room?.created_by != null &&
+      currentUserId != null &&
+      String(room.created_by) === String(currentUserId));
+
   const toggleScreenShare = async () => {
+    if (!canShareScreen) {
+      setError("Демонстрация экрана разрешена только создателю встречи");
+      return;
+    }
+
     if (isSharing) {
       await stopScreenShare();
       return;
@@ -1433,6 +1530,8 @@ function Conference() {
     }
 
     wsRef.current?.close();
+    chatWsRef.current?.close();
+    chatWsRef.current = null;
     closeConnections();
     stopMedia();
     releaseSessionLock();
@@ -1873,7 +1972,16 @@ function Conference() {
           aria-hidden={!chatOpen}
         >
           <div className={styles.panelHeader}>
-            <h2>Чат встречи</h2>
+            <div>
+              <h2>Чат встречи</h2>
+              <small className={styles.chatConnectionStatus}>
+                {chatConnectionState === "connected"
+                  ? "История сохраняется"
+                  : chatConnectionState === "connecting"
+                    ? "Подключение…"
+                    : "Чат временно недоступен"}
+              </small>
+            </div>
             <button
               type="button"
               onClick={closeChatPanel}
@@ -1912,6 +2020,16 @@ function Conference() {
                     </time>
                   </div>
                   <p>{message.text}</p>
+                  {message.isOwn && (
+                    <button
+                      type="button"
+                      className={styles.deleteChatMessage}
+                      onClick={() => deleteChatMessage(message.id)}
+                      aria-label="Удалить сообщение"
+                    >
+                      Удалить
+                    </button>
+                  )}
                 </article>
               ))
             )}
@@ -1931,7 +2049,7 @@ function Conference() {
             <button
               type="submit"
               className={styles.chatSendButton}
-              disabled={!chatDraft.trim() || connectionState !== "connected"}
+              disabled={!chatDraft.trim() || chatConnectionState !== "connected"}
               aria-label="Отправить сообщение"
             >
               <SendIcon />
@@ -1969,6 +2087,8 @@ function Conference() {
           type="button"
           className={isSharing ? styles.controlActive : ""}
           onClick={(event) => handleControlClick(event, toggleScreenShare)}
+          disabled={!canShareScreen}
+          title={!canShareScreen ? "Демонстрация экрана доступна только создателю" : undefined}
           aria-label="Демонстрация экрана"
         >
           <ScreenIcon />
