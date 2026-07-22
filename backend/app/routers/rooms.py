@@ -462,3 +462,62 @@ async def video_off_participant(
         "user_id": user_id,
         "is_video_off": True
     }
+
+
+@rooms_router.patch("/{invite_code}/participants/{user_id}/screen-off",
+                    summary="Остановить демонстрацию экрана участника (только для создателя)")
+async def screen_off_participant(
+        invite_code: str,
+        user_id: str,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+):
+    invite_code = invite_code.upper()
+
+    room = db.query(Room).filter(Room.invite_code == invite_code).first()
+    if not room:
+        raise HTTPException(status_code=404, detail="Комната не найдена")
+
+    if room.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="Только создатель может управлять участниками")
+
+    if room.status != RoomStatus.active:
+        raise HTTPException(status_code=400, detail="Комната не активна")
+
+    try:
+        target_uuid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Неверный ID пользователя")
+
+    participant = db.query(RoomParticipant).filter(
+        RoomParticipant.room_id == room.id,
+        RoomParticipant.user_id == target_uuid,
+        RoomParticipant.left_at.is_(None)
+    ).first()
+
+    if not participant:
+        raise HTTPException(status_code=404, detail="Участник не найден в этой комнате")
+
+    if participant.user_id == current_user.id:
+        raise HTTPException(status_code=400, detail="Нельзя остановить демонстрацию самому себе")
+
+    if not participant.is_screen_sharing:
+        raise HTTPException(status_code=400, detail="Участник не демонстрирует экран")
+
+    participant.is_screen_sharing = False
+    db.commit()
+
+    await _send_control_notification(
+        invite_code,
+        target_uuid,
+        "screen_off",
+        "Организатор остановил вашу демонстрацию экрана"
+    )
+
+    await _broadcast_status_update(invite_code, target_uuid, participant)
+
+    return {
+        "message": "Демонстрация экрана участника остановлена",
+        "user_id": user_id,
+        "is_screen_sharing": False
+    }
