@@ -521,3 +521,89 @@ async def screen_off_participant(
         "user_id": user_id,
         "is_screen_sharing": False
     }
+
+
+async def _broadcast_participant_removed(invite_code: str, user_id: uuid.UUID, username: str):
+    if invite_code not in ws_rooms:
+        return
+
+    payload = {
+        "type": "participant_removed",
+        "user_id": str(user_id),
+        "username": username
+    }
+
+    for client in ws_rooms[invite_code]:
+        try:
+            await client["ws"].send_text(json.dumps(payload))
+        except Exception:
+            pass
+
+
+@rooms_router.delete("/{invite_code}/participants/{user_id}",
+                     summary="Исключить участника из комнаты (только для создателя)")
+async def remove_participant(
+        invite_code: str,
+        user_id: str,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+):
+    invite_code = invite_code.upper()
+
+    room = db.query(Room).filter(Room.invite_code == invite_code).first()
+    if not room:
+        raise HTTPException(status_code=404, detail="Комната не найдена")
+
+    if room.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="Только создатель может исключать участников")
+
+    if room.status != RoomStatus.active:
+        raise HTTPException(status_code=400, detail="Комната не активна")
+
+    try:
+        target_uuid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Неверный ID пользователя")
+
+    if target_uuid == current_user.id:
+        raise HTTPException(status_code=400, detail="Нельзя исключить самого себя")
+
+    participant = db.query(RoomParticipant).filter(
+        RoomParticipant.room_id == room.id,
+        RoomParticipant.user_id == target_uuid,
+        RoomParticipant.left_at.is_(None)
+    ).first()
+
+    if not participant:
+        raise HTTPException(status_code=404, detail="Участник не найден в этой комнате")
+
+    target_user = db.query(User).filter(User.id == target_uuid).first()
+    target_username = target_user.username if target_user else "Участник"
+
+    participant.left_at = datetime.now(timezone.utc)
+    participant.is_screen_sharing = False
+    db.commit()
+
+    if invite_code in ws_rooms:
+        for client in ws_rooms[invite_code]:
+            if str(client.get("user_id")) == str(target_uuid):
+                try:
+                    await client["ws"].close(
+                        code=1000,
+                        reason="Вы были исключены из комнаты организатором"
+                    )
+                except Exception:
+                    pass
+        ws_rooms[invite_code] = [
+            client for client in ws_rooms[invite_code]
+            if str(client.get("user_id")) != str(target_uuid)
+        ]
+        if not ws_rooms[invite_code]:
+            del ws_rooms[invite_code]
+
+    await _broadcast_participant_removed(invite_code, target_uuid, target_username)
+
+    return {
+        "message": f"Участник {target_username} исключён из комнаты",
+        "user_id": user_id
+    }
