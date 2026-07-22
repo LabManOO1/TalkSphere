@@ -406,3 +406,59 @@ async def mute_participant(
         "user_id": user_id,
         "is_muted": True
     }
+
+
+@rooms_router.patch("/{invite_code}/participants/{user_id}/video-off",
+                    summary="Выключить камеру участника (только для создателя)")
+async def video_off_participant(
+        invite_code: str,
+        user_id: str,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+):
+    invite_code = invite_code.upper()
+
+    room = db.query(Room).filter(Room.invite_code == invite_code).first()
+    if not room:
+        raise HTTPException(status_code=404, detail="Комната не найдена")
+
+    if room.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="Только создатель может управлять участниками")
+
+    if room.status != RoomStatus.active:
+        raise HTTPException(status_code=400, detail="Комната не активна")
+
+    try:
+        target_uuid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Неверный ID пользователя")
+
+    participant = db.query(RoomParticipant).filter(
+        RoomParticipant.room_id == room.id,
+        RoomParticipant.user_id == target_uuid,
+        RoomParticipant.left_at.is_(None)
+    ).first()
+
+    if not participant:
+        raise HTTPException(status_code=404, detail="Участник не найден в этой комнате")
+
+    if participant.user_id == current_user.id:
+        raise HTTPException(status_code=400, detail="Нельзя выключить камеру самому себе")
+
+    participant.is_video_off = True
+    db.commit()
+
+    await _send_control_notification(
+        invite_code,
+        target_uuid,
+        "video_off",
+        "Организатор выключил вашу камеру"
+    )
+
+    await _broadcast_status_update(invite_code, target_uuid, participant)
+
+    return {
+        "message": "Камера участника выключена",
+        "user_id": user_id,
+        "is_video_off": True
+    }
