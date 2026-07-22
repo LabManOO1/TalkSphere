@@ -1,4 +1,5 @@
 import json
+import uuid
 import random
 import string
 from datetime import datetime, timezone
@@ -9,7 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from ..auth import get_current_user
-from ..database import get_db
+from ..database import get_db, SessionLocal
 from ..models.participant import RoomParticipant
 from ..models.scheduled_conference import ConferenceStatus, ScheduledConference
 from ..models.room import (
@@ -302,3 +303,106 @@ async def get_rooms(db: Session = Depends(get_db)):
             }
         )
     return {"total": len(result), "rooms": result}
+
+
+async def _send_control_notification(invite_code: str, user_id: uuid.UUID, action: str, reason: str):
+    if invite_code not in ws_rooms:
+        return
+
+    for client in ws_rooms[invite_code]:
+        if str(client.get("user_id")) == str(user_id):
+            try:
+                await client["ws"].send_text(json.dumps({
+                    "type": "control_action",
+                    "action": action,
+                    "reason": reason
+                }))
+            except Exception:
+                pass
+            break
+
+
+async def _broadcast_status_update(invite_code: str, user_id: uuid.UUID, participant):
+    if invite_code not in ws_rooms:
+        return
+
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+        username = user.username if user else "Участник"
+    finally:
+        db.close()
+
+    status_update = {
+        "type": "media-status",
+        "userId": str(user_id),
+        "user_id": str(user_id),
+        "username": username,
+        "isMuted": bool(participant.is_muted),
+        "is_muted": bool(participant.is_muted),
+        "isVideoOff": bool(participant.is_video_off),
+        "is_video_off": bool(participant.is_video_off),
+        "isScreenSharing": bool(participant.is_screen_sharing),
+        "is_screen_sharing": bool(participant.is_screen_sharing),
+    }
+
+    for client in ws_rooms[invite_code]:
+        try:
+            await client["ws"].send_text(json.dumps(status_update))
+        except Exception:
+            pass
+
+@rooms_router.patch("/{invite_code}/participants/{user_id}/mute",
+                    summary="Выключить микрофон участника (только для создателя)")
+async def mute_participant(
+        invite_code: str,
+        user_id: str,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+):
+    invite_code = invite_code.upper()
+
+    room = db.query(Room).filter(Room.invite_code == invite_code).first()
+    if not room:
+        raise HTTPException(status_code=404, detail="Комната не найдена")
+
+    if room.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="Только создатель может управлять участниками")
+
+    if room.status != RoomStatus.active:
+        raise HTTPException(status_code=400, detail="Комната не активна")
+
+    try:
+        target_uuid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Неверный ID пользователя")
+
+    participant = db.query(RoomParticipant).filter(
+        RoomParticipant.room_id == room.id,
+        RoomParticipant.user_id == target_uuid,
+        RoomParticipant.left_at.is_(None)
+    ).first()
+
+    if not participant:
+        raise HTTPException(status_code=404, detail="Участник не найден в этой комнате")
+
+    if participant.user_id == current_user.id:
+        raise HTTPException(status_code=400, detail="Нельзя выключить микрофон самому себе")
+
+    participant.is_muted = True
+    db.commit()
+
+    await _send_control_notification(
+        invite_code,
+        target_uuid,
+        "mute",
+        "Организатор выключил ваш микрофон"
+    )
+
+    await _broadcast_status_update(invite_code, target_uuid, participant)
+
+    return {
+        "message": "Микрофон участника выключен",
+        "user_id": user_id,
+        "is_muted": True
+    }
