@@ -1,4 +1,5 @@
 import json
+import uuid
 import random
 import string
 from datetime import datetime, timezone
@@ -9,7 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from ..auth import get_current_user
-from ..database import get_db
+from ..database import get_db, SessionLocal
 from ..models.participant import RoomParticipant
 from ..models.scheduled_conference import ConferenceStatus, ScheduledConference
 from ..models.room import (
@@ -302,3 +303,307 @@ async def get_rooms(db: Session = Depends(get_db)):
             }
         )
     return {"total": len(result), "rooms": result}
+
+
+async def _send_control_notification(invite_code: str, user_id: uuid.UUID, action: str, reason: str):
+    if invite_code not in ws_rooms:
+        return
+
+    for client in ws_rooms[invite_code]:
+        if str(client.get("user_id")) == str(user_id):
+            try:
+                await client["ws"].send_text(json.dumps({
+                    "type": "control_action",
+                    "action": action,
+                    "reason": reason
+                }))
+            except Exception:
+                pass
+            break
+
+
+async def _broadcast_status_update(invite_code: str, user_id: uuid.UUID, participant):
+    if invite_code not in ws_rooms:
+        return
+
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+        username = user.username if user else "Участник"
+    finally:
+        db.close()
+
+    status_update = {
+        "type": "media-status",
+        "userId": str(user_id),
+        "user_id": str(user_id),
+        "username": username,
+        "isMuted": bool(participant.is_muted),
+        "is_muted": bool(participant.is_muted),
+        "isVideoOff": bool(participant.is_video_off),
+        "is_video_off": bool(participant.is_video_off),
+        "isScreenSharing": bool(participant.is_screen_sharing),
+        "is_screen_sharing": bool(participant.is_screen_sharing),
+    }
+
+    for client in ws_rooms[invite_code]:
+        try:
+            await client["ws"].send_text(json.dumps(status_update))
+        except Exception:
+            pass
+
+@rooms_router.patch("/{invite_code}/participants/{user_id}/mute",
+                    summary="Выключить микрофон участника (только для создателя)")
+async def mute_participant(
+        invite_code: str,
+        user_id: str,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+):
+    invite_code = invite_code.upper()
+
+    room = db.query(Room).filter(Room.invite_code == invite_code).first()
+    if not room:
+        raise HTTPException(status_code=404, detail="Комната не найдена")
+
+    if room.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="Только создатель может управлять участниками")
+
+    if room.status != RoomStatus.active:
+        raise HTTPException(status_code=400, detail="Комната не активна")
+
+    try:
+        target_uuid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Неверный ID пользователя")
+
+    participant = db.query(RoomParticipant).filter(
+        RoomParticipant.room_id == room.id,
+        RoomParticipant.user_id == target_uuid,
+        RoomParticipant.left_at.is_(None)
+    ).first()
+
+    if not participant:
+        raise HTTPException(status_code=404, detail="Участник не найден в этой комнате")
+
+    if participant.user_id == current_user.id:
+        raise HTTPException(status_code=400, detail="Нельзя выключить микрофон самому себе")
+
+    participant.is_muted = True
+    db.commit()
+
+    await _send_control_notification(
+        invite_code,
+        target_uuid,
+        "mute",
+        "Организатор выключил ваш микрофон"
+    )
+
+    await _broadcast_status_update(invite_code, target_uuid, participant)
+
+    return {
+        "message": "Микрофон участника выключен",
+        "user_id": user_id,
+        "is_muted": True
+    }
+
+
+@rooms_router.patch("/{invite_code}/participants/{user_id}/video-off",
+                    summary="Выключить камеру участника (только для создателя)")
+async def video_off_participant(
+        invite_code: str,
+        user_id: str,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+):
+    invite_code = invite_code.upper()
+
+    room = db.query(Room).filter(Room.invite_code == invite_code).first()
+    if not room:
+        raise HTTPException(status_code=404, detail="Комната не найдена")
+
+    if room.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="Только создатель может управлять участниками")
+
+    if room.status != RoomStatus.active:
+        raise HTTPException(status_code=400, detail="Комната не активна")
+
+    try:
+        target_uuid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Неверный ID пользователя")
+
+    participant = db.query(RoomParticipant).filter(
+        RoomParticipant.room_id == room.id,
+        RoomParticipant.user_id == target_uuid,
+        RoomParticipant.left_at.is_(None)
+    ).first()
+
+    if not participant:
+        raise HTTPException(status_code=404, detail="Участник не найден в этой комнате")
+
+    if participant.user_id == current_user.id:
+        raise HTTPException(status_code=400, detail="Нельзя выключить камеру самому себе")
+
+    participant.is_video_off = True
+    db.commit()
+
+    await _send_control_notification(
+        invite_code,
+        target_uuid,
+        "video_off",
+        "Организатор выключил вашу камеру"
+    )
+
+    await _broadcast_status_update(invite_code, target_uuid, participant)
+
+    return {
+        "message": "Камера участника выключена",
+        "user_id": user_id,
+        "is_video_off": True
+    }
+
+
+@rooms_router.patch("/{invite_code}/participants/{user_id}/screen-off",
+                    summary="Остановить демонстрацию экрана участника (только для создателя)")
+async def screen_off_participant(
+        invite_code: str,
+        user_id: str,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+):
+    invite_code = invite_code.upper()
+
+    room = db.query(Room).filter(Room.invite_code == invite_code).first()
+    if not room:
+        raise HTTPException(status_code=404, detail="Комната не найдена")
+
+    if room.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="Только создатель может управлять участниками")
+
+    if room.status != RoomStatus.active:
+        raise HTTPException(status_code=400, detail="Комната не активна")
+
+    try:
+        target_uuid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Неверный ID пользователя")
+
+    participant = db.query(RoomParticipant).filter(
+        RoomParticipant.room_id == room.id,
+        RoomParticipant.user_id == target_uuid,
+        RoomParticipant.left_at.is_(None)
+    ).first()
+
+    if not participant:
+        raise HTTPException(status_code=404, detail="Участник не найден в этой комнате")
+
+    if participant.user_id == current_user.id:
+        raise HTTPException(status_code=400, detail="Нельзя остановить демонстрацию самому себе")
+
+    if not participant.is_screen_sharing:
+        raise HTTPException(status_code=400, detail="Участник не демонстрирует экран")
+
+    participant.is_screen_sharing = False
+    db.commit()
+
+    await _send_control_notification(
+        invite_code,
+        target_uuid,
+        "screen_off",
+        "Организатор остановил вашу демонстрацию экрана"
+    )
+
+    await _broadcast_status_update(invite_code, target_uuid, participant)
+
+    return {
+        "message": "Демонстрация экрана участника остановлена",
+        "user_id": user_id,
+        "is_screen_sharing": False
+    }
+
+
+async def _broadcast_participant_removed(invite_code: str, user_id: uuid.UUID, username: str):
+    if invite_code not in ws_rooms:
+        return
+
+    payload = {
+        "type": "participant_removed",
+        "user_id": str(user_id),
+        "username": username
+    }
+
+    for client in ws_rooms[invite_code]:
+        try:
+            await client["ws"].send_text(json.dumps(payload))
+        except Exception:
+            pass
+
+
+@rooms_router.delete("/{invite_code}/participants/{user_id}",
+                     summary="Исключить участника из комнаты (только для создателя)")
+async def remove_participant(
+        invite_code: str,
+        user_id: str,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+):
+    invite_code = invite_code.upper()
+
+    room = db.query(Room).filter(Room.invite_code == invite_code).first()
+    if not room:
+        raise HTTPException(status_code=404, detail="Комната не найдена")
+
+    if room.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="Только создатель может исключать участников")
+
+    if room.status != RoomStatus.active:
+        raise HTTPException(status_code=400, detail="Комната не активна")
+
+    try:
+        target_uuid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Неверный ID пользователя")
+
+    if target_uuid == current_user.id:
+        raise HTTPException(status_code=400, detail="Нельзя исключить самого себя")
+
+    participant = db.query(RoomParticipant).filter(
+        RoomParticipant.room_id == room.id,
+        RoomParticipant.user_id == target_uuid,
+        RoomParticipant.left_at.is_(None)
+    ).first()
+
+    if not participant:
+        raise HTTPException(status_code=404, detail="Участник не найден в этой комнате")
+
+    target_user = db.query(User).filter(User.id == target_uuid).first()
+    target_username = target_user.username if target_user else "Участник"
+
+    participant.left_at = datetime.now(timezone.utc)
+    participant.is_screen_sharing = False
+    db.commit()
+
+    if invite_code in ws_rooms:
+        for client in ws_rooms[invite_code]:
+            if str(client.get("user_id")) == str(target_uuid):
+                try:
+                    await client["ws"].close(
+                        code=1000,
+                        reason="Вы были исключены из комнаты организатором"
+                    )
+                except Exception:
+                    pass
+        ws_rooms[invite_code] = [
+            client for client in ws_rooms[invite_code]
+            if str(client.get("user_id")) != str(target_uuid)
+        ]
+        if not ws_rooms[invite_code]:
+            del ws_rooms[invite_code]
+
+    await _broadcast_participant_removed(invite_code, target_uuid, target_username)
+
+    return {
+        "message": f"Участник {target_username} исключён из комнаты",
+        "user_id": user_id
+    }
