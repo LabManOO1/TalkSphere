@@ -56,3 +56,46 @@
   .meetingCard h2 { padding-right: 90px; font-size: 21px; }
   .notice, .error { margin-top: 14px; margin-bottom: -20px; }
 }
+
+.pendingInvitationCard {
+  background: linear-gradient(110deg, #7f3000, #4d1200);
+}
+
+.invitationNote {
+  margin: 16px 0 0;
+  padding: 11px 13px;
+  border: 1px solid rgba(255,255,255,.24);
+  border-radius: 14px;
+  background: rgba(255,255,255,.09);
+  color: rgba(255,255,255,.88);
+  font-family: "Manrope", sans-serif;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.cardActions button:disabled {
+  opacity: .58;
+  cursor: wait;
+}
+
+.cardActions .acceptButton {
+  background: #fff;
+  color: #6d2100;
+}
+
+.cardActions .declineButton {
+  border: 1px solid rgba(255,255,255,.45);
+  background: transparent;
+  color: #fff;
+}
+
+.invitationDot {
+  width: 6px;
+  height: 6px;
+  background: #ff9d00;
+  box-shadow: 0 0 0 2px rgba(255,157,0,.18);
+}
+
+.selectedDay .invitationDot {
+  background: #ffd18a;
+}

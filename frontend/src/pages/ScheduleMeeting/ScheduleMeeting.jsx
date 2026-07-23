@@ -62,10 +62,14 @@ function ScheduleMeeting() {
       return;
     }
 
-    const participantEmails = participants
-      .split(/[\s,;]+/)
-      .map((value) => value.trim().toLowerCase())
-      .filter(Boolean);
+    const participantEmails = Array.from(
+      new Set(
+        participants
+          .split(/[\s,;]+/)
+          .map((value) => value.trim().toLowerCase())
+          .filter(Boolean),
+      ),
+    );
     const invalidEmail = participantEmails.find((value) => !/^\S+@\S+\.\S+$/.test(value));
     if (invalidEmail) {
       setError(`Некорректный email: ${invalidEmail}`);
@@ -135,7 +139,9 @@ function ScheduleMeeting() {
             <label className={styles.field}>
               <span>Участники</span>
               <input value={participants} onChange={(event) => setParticipants(event.target.value)} placeholder="email1@example.com, email2@example.com" />
-              <small>Укажите email зарегистрированных пользователей через запятую.</small>
+              <small>
+                Укажите email зарегистрированных пользователей через запятую. Им придёт уведомление внутри TalkSphere, а встреча появится в их календаре.
+              </small>
             </label>
 
             <div className={styles.settingsBlock}>

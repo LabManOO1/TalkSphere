@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Header from "../../components/Header/Header";
 import Footer from "../../components/Footer/Footer";
@@ -63,14 +63,44 @@ function Meetings() {
 
   const [dialog, setDialog] = useState(null);
   const [title, setTitle] = useState("");
+  const [disableParticipantCamera, setDisableParticipantCamera] = useState(false);
+  const [disableParticipantMicrophone, setDisableParticipantMicrophone] = useState(false);
+  const [creatorOnlyScreenShare, setCreatorOnlyScreenShare] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(true);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+
+  const resetCreateForm = () => {
+    setTitle("");
+    setDisableParticipantCamera(false);
+    setDisableParticipantMicrophone(false);
+    setCreatorOnlyScreenShare(false);
+    setSettingsOpen(true);
+    setError("");
+  };
 
   const closeDialog = () => {
     if (isLoading) return;
     setDialog(null);
     setError("");
   };
+
+  useEffect(() => {
+    if (!dialog) return undefined;
+
+    const previousOverflow = document.body.style.overflow;
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") closeDialog();
+    };
+
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [dialog, isLoading]);
 
   const openSchedulePage = () => {
     if (!isAuthenticated) {
@@ -82,7 +112,7 @@ function Meetings() {
   };
 
   const openCreateDialog = () => {
-    setError("");
+    resetCreateForm();
 
     if (!isAuthenticated) {
       setDialog("auth");
@@ -100,6 +130,11 @@ function Meetings() {
     try {
       const response = await apiClient.post("/rooms/create", {
         title: title.trim() || "Новая конференция",
+        camera_on_join: true,
+        microphone_on_join: true,
+        allow_participant_camera: !disableParticipantCamera,
+        allow_participant_microphone: !disableParticipantMicrophone,
+        screen_share_policy: creatorOnlyScreenShare ? "creator_only" : "everyone",
       });
 
       const room = response.data;
@@ -162,7 +197,7 @@ function Meetings() {
       {dialog && (
         <div className={styles.overlay} onMouseDown={closeDialog}>
           <div
-            className={styles.dialog}
+            className={`${styles.dialog} ${dialog === "create" ? styles.createDialog : ""}`}
             role="dialog"
             aria-modal="true"
             aria-labelledby="meeting-dialog-title"
@@ -194,18 +229,78 @@ function Meetings() {
             )}
 
             {dialog === "create" && (
-              <form onSubmit={handleCreateRoom}>
+              <form onSubmit={handleCreateRoom} className={styles.createForm}>
                 <h2 id="meeting-dialog-title">Новая конференция</h2>
+                <p className={styles.dialogLead}>
+                  Настройте права участников перед созданием комнаты.
+                </p>
+
                 <label className={styles.field}>
                   <span>Название</span>
                   <input
                     value={title}
                     onChange={(event) => setTitle(event.target.value)}
                     placeholder="Новая конференция"
-                    maxLength={120}
+                    maxLength={255}
                     autoFocus
                   />
                 </label>
+
+                <div className={styles.settingsBlock}>
+                  <button
+                    type="button"
+                    className={styles.settingsToggle}
+                    onClick={() => setSettingsOpen((value) => !value)}
+                    aria-expanded={settingsOpen}
+                  >
+                    <span>Дополнительные настройки</span>
+                    <strong aria-hidden="true">{settingsOpen ? "−" : "+"}</strong>
+                  </button>
+
+                  {settingsOpen && (
+                    <div className={styles.settingsList}>
+                      <p className={styles.settingsHint}>
+                        Ограничения применяются только к участникам. Создатель комнаты сохраняет доступ к своим устройствам.
+                      </p>
+
+                      <label className={styles.switchRow}>
+                        <input
+                          type="checkbox"
+                          checked={disableParticipantCamera}
+                          onChange={(event) => setDisableParticipantCamera(event.target.checked)}
+                        />
+                        <span>
+                          <strong>Запретить камеры участникам</strong>
+                          <small>Участники не смогут включить видео во время встречи.</small>
+                        </span>
+                      </label>
+
+                      <label className={styles.switchRow}>
+                        <input
+                          type="checkbox"
+                          checked={disableParticipantMicrophone}
+                          onChange={(event) => setDisableParticipantMicrophone(event.target.checked)}
+                        />
+                        <span>
+                          <strong>Запретить микрофоны участникам</strong>
+                          <small>Участники не смогут включить звук во время встречи.</small>
+                        </span>
+                      </label>
+
+                      <label className={styles.switchRow}>
+                        <input
+                          type="checkbox"
+                          checked={creatorOnlyScreenShare}
+                          onChange={(event) => setCreatorOnlyScreenShare(event.target.checked)}
+                        />
+                        <span>
+                          <strong>Запретить демонстрацию экрана участникам</strong>
+                          <small>Демонстрацию сможет запускать только создатель встречи.</small>
+                        </span>
+                      </label>
+                    </div>
+                  )}
+                </div>
 
                 {error && (
                   <p className={styles.error} role="alert">
@@ -222,7 +317,6 @@ function Meetings() {
                 </button>
               </form>
             )}
-
           </div>
         </div>
       )}
