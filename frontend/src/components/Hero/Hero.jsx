@@ -20,7 +20,7 @@ function Hero() {
                 <div className={styles.screenshot}>
                     <img
                         className={styles.screenshotImg}
-                        src="https://picsum.photos/seed/talksphere-hero/1200/640"
+                        src="/prewie.png"
                         alt="Скриншот сервиса TalkSphere"
                     />
                 </div>
