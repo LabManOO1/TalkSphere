@@ -833,32 +833,159 @@
     gap: 10px;
     list-style: none;
   }
+}
 
-  li {
-    padding: 9px;
+.participantItem {
+  padding: 11px;
+  border: 1px solid rgba(255, 255, 255, 0.065);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.participantSummary {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.participantAvatar {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: #850006;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.participantIdentity {
+  min-width: 0;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+
+  strong {
+    overflow: hidden;
+    color: #f2f2f2;
+    font-size: 13px;
+    line-height: 1.25;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  small {
+    color: #929292;
+    font-size: 10px;
+  }
+}
+
+.participantStatuses {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+
+  > span {
+    width: 25px;
+    height: 25px;
+    border-radius: 8px;
+    display: grid;
+    place-items: center;
+    background: rgba(164, 0, 0, 0.25);
+    color: #ffc4c4;
+  }
+
+  svg {
+    width: 15px;
+    height: 15px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2.2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+}
+
+.screenSharingStatus {
+  background: rgba(58, 151, 78, 0.2) !important;
+  color: #a7edb4 !important;
+}
+
+.participantActions {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+
+  button {
+    min-width: 0;
+    min-height: 34px;
+    padding: 7px 8px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 9px;
+    position: relative;
     display: flex;
     align-items: center;
-    gap: 11px;
-    border-radius: 13px;
+    justify-content: center;
+    gap: 6px;
     background: rgba(255, 255, 255, 0.055);
-    font-size: 14px;
+    color: #dedede;
+    cursor: pointer;
+    font-size: 10px;
+    font-weight: 700;
+    transition: background 0.18s ease, border-color 0.18s ease;
 
-    > span {
-      width: 36px;
-      height: 36px;
-      flex-shrink: 0;
-      border-radius: 50%;
-      display: grid;
-      place-items: center;
-      background: #850006;
-      font-weight: 800;
+    &:hover:not(:disabled) {
+      border-color: rgba(255, 255, 255, 0.17);
+      background: rgba(255, 255, 255, 0.095);
     }
 
-    small {
-      margin-left: auto;
-      color: #aaa;
+    &:disabled {
+      cursor: not-allowed;
+      opacity: 0.38;
+    }
+
+    svg {
+      width: 16px;
+      height: 16px;
+      flex: 0 0 auto;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2.1;
+      stroke-linecap: round;
+      stroke-linejoin: round;
     }
   }
+}
+
+.removeParticipantButton {
+  border-color: rgba(214, 70, 70, 0.22) !important;
+  background: rgba(164, 0, 0, 0.16) !important;
+  color: #ffc2c2 !important;
+
+  > span:first-child {
+    font-size: 19px;
+    font-weight: 400;
+    line-height: 0.7;
+  }
+
+  &:hover:not(:disabled) {
+    background: rgba(164, 0, 0, 0.3) !important;
+  }
+}
+
+.actionSpinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 0.75s linear infinite;
 }
 
 .chatPanel {

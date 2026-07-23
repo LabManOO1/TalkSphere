@@ -233,6 +233,7 @@ function Conference() {
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [isJoined, setIsJoined] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
+  const [participantAction, setParticipantAction] = useState("");
 
   const isRoomCreator =
     room?.created_by != null &&
@@ -251,6 +252,7 @@ function Conference() {
   const peerConnectionsRef = useRef(new Map());
   const remoteStreamsRef = useRef(new Map());
   const queuedCandidatesRef = useRef(new Map());
+  const remoteParticipantsRef = useRef([]);
   const isLeavingRef = useRef(false);
   const micEnabledRef = useRef(true);
   const cameraEnabledRef = useRef(true);
@@ -265,6 +267,7 @@ function Conference() {
   const participantPollRef = useRef(null);
   const chatOpenRef = useRef(false);
   const chatMessagesRef = useRef(null);
+  const forcedControlActionRef = useRef(null);
 
   useEffect(() => {
     const previousBodyOverflow = document.body.style.overflow;
@@ -281,6 +284,10 @@ function Conference() {
       document.body.style.overscrollBehavior = previousBodyOverscroll;
     };
   }, []);
+
+  useEffect(() => {
+    remoteParticipantsRef.current = remoteParticipants;
+  }, [remoteParticipants]);
 
   useEffect(() => {
     chatOpenRef.current = chatOpen;
@@ -353,6 +360,93 @@ function Conference() {
           ...patch,
         },
       ];
+    });
+  }, []);
+
+  const updateParticipantStatusByUserId = useCallback((userId, patch) => {
+    if (userId == null) return;
+    const normalizedUserId = String(userId);
+
+    setRemoteParticipants((current) =>
+      current.map((participant) =>
+        participant.userId != null &&
+        String(participant.userId) === normalizedUserId
+          ? { ...participant, ...patch }
+          : participant,
+      ),
+    );
+
+    setRoom((current) => {
+      if (!current?.participants) return current;
+
+      return {
+        ...current,
+        participants: current.participants.map((participant) => {
+          if (
+            participant.user_id == null ||
+            String(participant.user_id) !== normalizedUserId
+          ) {
+            return participant;
+          }
+
+          return {
+            ...participant,
+            is_muted:
+              patch.isMuted ?? patch.is_muted ?? participant.is_muted,
+            is_video_off:
+              patch.isVideoOff ??
+              patch.is_video_off ??
+              participant.is_video_off,
+            is_screen_sharing:
+              patch.isScreenSharing ??
+              patch.is_screen_sharing ??
+              participant.is_screen_sharing,
+          };
+        }),
+      };
+    });
+  }, []);
+
+  const removeParticipantFromUi = useCallback((userId) => {
+    if (userId == null) return;
+    const normalizedUserId = String(userId);
+
+    remoteParticipantsRef.current
+      .filter(
+        (participant) =>
+          participant.userId != null &&
+          String(participant.userId) === normalizedUserId,
+      )
+      .forEach((participant) => {
+        const connection = peerConnectionsRef.current.get(participant.peerId);
+        if (connection) connection.close();
+        peerConnectionsRef.current.delete(participant.peerId);
+        remoteStreamsRef.current.delete(participant.peerId);
+        queuedCandidatesRef.current.delete(participant.peerId);
+      });
+
+    setRemoteParticipants((current) =>
+      current.filter(
+        (participant) =>
+          participant.userId == null ||
+          String(participant.userId) !== normalizedUserId,
+      ),
+    );
+
+    setRoom((current) => {
+      if (!current?.participants) return current;
+
+      const participants = current.participants.filter(
+        (participant) =>
+          participant.user_id == null ||
+          String(participant.user_id) !== normalizedUserId,
+      );
+
+      return {
+        ...current,
+        participants,
+        participants_count: participants.length,
+      };
     });
   }, []);
 
@@ -763,6 +857,61 @@ function Conference() {
         return;
       }
 
+      if (message.type === "control_action") {
+        setError(message.reason || "Организатор изменил настройки ваших устройств");
+        void forcedControlActionRef.current?.(message.action);
+        return;
+      }
+
+      if (message.type === "participant_removed") {
+        removeParticipantFromUi(messageUserId);
+        return;
+      }
+
+      if (message.type === "media-status") {
+        const statusPatch = {
+          username: messageUsername,
+          userId: messageUserId,
+          isMuted: Boolean(message.isMuted ?? message.is_muted),
+          isVideoOff: Boolean(message.isVideoOff ?? message.is_video_off),
+          isScreenSharing: Boolean(
+            message.isScreenSharing ?? message.is_screen_sharing,
+          ),
+        };
+
+        if (
+          messageUserId != null &&
+          currentUserId != null &&
+          String(messageUserId) === String(currentUserId)
+        ) {
+          if (statusPatch.isMuted) {
+            const audioTrack = localStreamRef.current?.getAudioTracks()[0];
+            if (audioTrack) audioTrack.enabled = false;
+            micEnabledRef.current = false;
+            setMicEnabled(false);
+          }
+
+          if (statusPatch.isVideoOff) {
+            const videoTrack = cameraTrackRef.current;
+            if (videoTrack) videoTrack.enabled = false;
+            cameraEnabledRef.current = false;
+            setCameraEnabled(false);
+          }
+
+          if (!statusPatch.isScreenSharing && isSharingRef.current) {
+            void forcedControlActionRef.current?.("screen_off");
+          }
+          return;
+        }
+
+        if (messageFrom) {
+          updateRemoteParticipant(messageFrom, statusPatch);
+        } else {
+          updateParticipantStatusByUserId(messageUserId, statusPatch);
+        }
+        return;
+      }
+
       if (message.type === "permission_denied") {
         setError(message.detail || "Действие запрещено организатором");
 
@@ -952,19 +1101,6 @@ function Conference() {
           return;
         }
 
-        if (message.type === "media-status") {
-          updateRemoteParticipant(peerId, {
-            username: messageUsername,
-            userId: messageUserId,
-            isMuted: Boolean(message.isMuted ?? message.is_muted),
-            isVideoOff: Boolean(message.isVideoOff ?? message.is_video_off),
-            isScreenSharing: Boolean(
-              message.isScreenSharing ?? message.is_screen_sharing,
-            ),
-          });
-          return;
-        }
-
         if (message.type === "leave") removePeer(peerId);
       } catch (signalError) {
         console.error("Ошибка обработки сигнального сообщения", signalError);
@@ -979,8 +1115,10 @@ function Conference() {
       currentUserId,
       navigate,
       releaseSessionLock,
+      removeParticipantFromUi,
       removePeer,
       sendSignal,
+      updateParticipantStatusByUserId,
       updateRemoteParticipant,
     ],
   );
@@ -1248,7 +1386,7 @@ function Conference() {
         }
       };
 
-      socket.onclose = () => {
+      socket.onclose = (closeEvent) => {
         if (wsRef.current !== socket) return;
 
         wsRef.current = null;
@@ -1262,6 +1400,31 @@ function Conference() {
           participantPollRef.current = null;
         }
 
+        const closeReason = String(closeEvent?.reason || "");
+        const wasRemoved = /исключ/i.test(closeReason);
+        const roomWasEnded = /завершен|завершена/i.test(closeReason);
+
+        if (wasRemoved || roomWasEnded) {
+          isLeavingRef.current = true;
+          joinedRef.current = false;
+          setIsJoined(false);
+          setIsJoining(false);
+          setConnectionState("error");
+          setError(
+            closeReason ||
+              (wasRemoved
+                ? "Организатор исключил вас из встречи"
+                : "Конференция завершена"),
+          );
+          closeConnections();
+          stopMedia();
+          releaseSessionLock();
+          redirectTimerRef.current = window.setTimeout(() => {
+            navigate("/meetings", { replace: true });
+          }, 2200);
+          return;
+        }
+
         if (!joinedRef.current) {
           setIsJoining(false);
           releaseSessionLock();
@@ -1269,6 +1432,7 @@ function Conference() {
         }
 
         joinedRef.current = false;
+        setIsJoined(false);
         if (!isLeavingRef.current) {
           setConnectionState("error");
           setError("Соединение с конференцией прервано");
@@ -1284,12 +1448,15 @@ function Conference() {
   }, [
     broadcastMediaStatus,
     claimSessionLock,
+    closeConnections,
     connectChat,
     handleSignalMessage,
     inviteCode,
+    navigate,
     releaseSessionLock,
     sendSignal,
     startParticipantPolling,
+    stopMedia,
     token,
   ]);
 
@@ -1494,6 +1661,34 @@ function Conference() {
     await updateStatusOnServer({ is_screen_sharing: false });
   }, [broadcastMediaStatus, cameraEnabled, updateStatusOnServer]);
 
+  useEffect(() => {
+    forcedControlActionRef.current = async (action) => {
+      if (action === "mute") {
+        const audioTrack = localStreamRef.current?.getAudioTracks()[0];
+        if (audioTrack) audioTrack.enabled = false;
+        micEnabledRef.current = false;
+        setMicEnabled(false);
+        return;
+      }
+
+      if (action === "video_off") {
+        const videoTrack = cameraTrackRef.current;
+        if (videoTrack) videoTrack.enabled = false;
+        cameraEnabledRef.current = false;
+        setCameraEnabled(false);
+        return;
+      }
+
+      if (action === "screen_off") {
+        await stopScreenShare();
+      }
+    };
+
+    return () => {
+      forcedControlActionRef.current = null;
+    };
+  }, [stopScreenShare]);
+
   const canShareScreen =
     room?.screen_share_policy !== "creator_only" || isRoomCreator;
 
@@ -1560,6 +1755,64 @@ function Conference() {
     }
   };
 
+  const runParticipantAction = useCallback(
+    async (participant, action) => {
+      if (!isRoomCreator || participant?.isSelf || !participant?.userId) return;
+
+      if (
+        action === "remove" &&
+        !window.confirm(`Исключить участника «${participant.name}» из встречи?`)
+      ) {
+        return;
+      }
+
+      const actionKey = `${participant.userId}:${action}`;
+      setParticipantAction(actionKey);
+      setError("");
+
+      const participantPath = `/rooms/${encodeURIComponent(
+        inviteCode,
+      )}/participants/${encodeURIComponent(participant.userId)}`;
+
+      try {
+        if (action === "mute") {
+          await apiClient.patch(`${participantPath}/mute`);
+          updateParticipantStatusByUserId(participant.userId, { isMuted: true });
+        } else if (action === "video_off") {
+          await apiClient.patch(`${participantPath}/video-off`);
+          updateParticipantStatusByUserId(participant.userId, {
+            isVideoOff: true,
+          });
+        } else if (action === "screen_off") {
+          await apiClient.patch(`${participantPath}/screen-off`);
+          updateParticipantStatusByUserId(participant.userId, {
+            isScreenSharing: false,
+          });
+        } else if (action === "remove") {
+          await apiClient.delete(participantPath);
+          removeParticipantFromUi(participant.userId);
+          if (participant.peerId) removePeer(participant.peerId);
+        }
+      } catch (actionError) {
+        setError(
+          getErrorMessage(
+            actionError,
+            "Не удалось выполнить действие с участником",
+          ),
+        );
+      } finally {
+        setParticipantAction("");
+      }
+    },
+    [
+      inviteCode,
+      isRoomCreator,
+      removeParticipantFromUi,
+      removePeer,
+      updateParticipantStatusByUserId,
+    ],
+  );
+
   const leaveConference = async () => {
     isLeavingRef.current = true;
     joinedRef.current = false;
@@ -1616,24 +1869,85 @@ function Conference() {
 
   const displayedParticipants = useMemo(() => {
     const participants = new Map();
-    participants.set(String(currentUserId || "local"), currentUsername);
+    const creatorId = room?.created_by == null ? null : String(room.created_by);
+
+    const mergeParticipant = ({
+      userId = null,
+      peerId = null,
+      name = "Участник",
+      isMuted,
+      isVideoOff,
+      isScreenSharing,
+      isSelf = false,
+    }) => {
+      const key = String(userId || peerId || name);
+      const previous = participants.get(key) || {};
+      const normalizedUserId = userId == null ? previous.userId ?? null : String(userId);
+
+      participants.set(key, {
+        ...previous,
+        id: key,
+        userId: normalizedUserId,
+        peerId: peerId || previous.peerId || null,
+        name: name || previous.name || "Участник",
+        isMuted: isMuted ?? previous.isMuted ?? false,
+        isVideoOff: isVideoOff ?? previous.isVideoOff ?? false,
+        isScreenSharing:
+          isScreenSharing ?? previous.isScreenSharing ?? false,
+        isSelf: isSelf || previous.isSelf || false,
+        isCreator:
+          normalizedUserId != null && creatorId != null
+            ? normalizedUserId === creatorId
+            : previous.isCreator || false,
+      });
+    };
+
+    mergeParticipant({
+      userId: currentUserId,
+      peerId: "local",
+      name: currentUsername,
+      isMuted: !micEnabled,
+      isVideoOff: !cameraEnabled && !isSharing,
+      isScreenSharing: isSharing,
+      isSelf: true,
+    });
 
     (room?.participants || []).forEach((participant) => {
-      participants.set(
-        String(participant.user_id || participant.username),
-        participant.username,
-      );
+      mergeParticipant({
+        userId: participant.user_id,
+        name: participant.username,
+        isMuted: Boolean(participant.is_muted),
+        isVideoOff: Boolean(participant.is_video_off),
+        isScreenSharing: Boolean(participant.is_screen_sharing),
+      });
     });
 
     visibleRemoteParticipants.forEach((participant) => {
-      participants.set(
-        String(participant.userId || participant.peerId),
-        participant.username || "Участник",
-      );
+      mergeParticipant({
+        userId: participant.userId,
+        peerId: participant.peerId,
+        name: participant.username || "Участник",
+        isMuted: participant.isMuted,
+        isVideoOff: participant.isVideoOff,
+        isScreenSharing: participant.isScreenSharing,
+      });
     });
 
-    return Array.from(participants.entries()).map(([id, name]) => ({ id, name }));
-  }, [currentUserId, currentUsername, room, visibleRemoteParticipants]);
+    return Array.from(participants.values()).sort((first, second) => {
+      if (first.isSelf !== second.isSelf) return first.isSelf ? -1 : 1;
+      if (first.isCreator !== second.isCreator) return first.isCreator ? -1 : 1;
+      return first.name.localeCompare(second.name, "ru");
+    });
+  }, [
+    cameraEnabled,
+    currentUserId,
+    currentUsername,
+    isSharing,
+    micEnabled,
+    room?.created_by,
+    room?.participants,
+    visibleRemoteParticipants,
+  ]);
 
   const videoParticipants = [
     {
@@ -2045,13 +2359,147 @@ function Conference() {
           </div>
 
           <ul>
-            {displayedParticipants.map((participant, index) => (
-              <li key={participant.id}>
-                <span>{participant.name.slice(0, 1).toUpperCase()}</span>
-                {participant.name}
-                {index === 0 && <small>Вы</small>}
-              </li>
-            ))}
+            {displayedParticipants.map((participant) => {
+              const muteActionKey = `${participant.userId}:mute`;
+              const videoActionKey = `${participant.userId}:video_off`;
+              const screenActionKey = `${participant.userId}:screen_off`;
+              const removeActionKey = `${participant.userId}:remove`;
+              const actionInProgress = Boolean(participantAction);
+
+              return (
+                <li key={participant.id} className={styles.participantItem}>
+                  <div className={styles.participantSummary}>
+                    <span className={styles.participantAvatar}>
+                      {participant.name.slice(0, 1).toUpperCase()}
+                    </span>
+
+                    <div className={styles.participantIdentity}>
+                      <strong>{participant.name}</strong>
+                      <small>
+                        {participant.isSelf
+                          ? "Вы"
+                          : participant.isCreator
+                            ? "Организатор"
+                            : "Участник"}
+                      </small>
+                    </div>
+
+                    <div
+                      className={styles.participantStatuses}
+                      aria-label="Статус устройств участника"
+                    >
+                      {participant.isMuted && (
+                        <span title="Микрофон выключен">
+                          <MicIcon off />
+                        </span>
+                      )}
+                      {participant.isVideoOff && (
+                        <span title="Камера выключена">
+                          <CameraIcon off />
+                        </span>
+                      )}
+                      {participant.isScreenSharing && (
+                        <span
+                          className={styles.screenSharingStatus}
+                          title="Идёт демонстрация экрана"
+                        >
+                          <ScreenIcon />
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {isRoomCreator && !participant.isSelf && (
+                    <div className={styles.participantActions}>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void runParticipantAction(participant, "mute")
+                        }
+                        disabled={
+                          !participant.userId ||
+                          participant.isMuted ||
+                          actionInProgress
+                        }
+                        title={
+                          participant.isMuted
+                            ? "Микрофон уже выключен"
+                            : "Выключить микрофон"
+                        }
+                      >
+                        <MicIcon off />
+                        <span>Микрофон</span>
+                        {participantAction === muteActionKey && (
+                          <i className={styles.actionSpinner} />
+                        )}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void runParticipantAction(participant, "video_off")
+                        }
+                        disabled={
+                          !participant.userId ||
+                          participant.isVideoOff ||
+                          actionInProgress
+                        }
+                        title={
+                          participant.isVideoOff
+                            ? "Камера уже выключена"
+                            : "Выключить камеру"
+                        }
+                      >
+                        <CameraIcon off />
+                        <span>Камера</span>
+                        {participantAction === videoActionKey && (
+                          <i className={styles.actionSpinner} />
+                        )}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void runParticipantAction(participant, "screen_off")
+                        }
+                        disabled={
+                          !participant.userId ||
+                          !participant.isScreenSharing ||
+                          actionInProgress
+                        }
+                        title={
+                          participant.isScreenSharing
+                            ? "Остановить демонстрацию экрана"
+                            : "Участник не демонстрирует экран"
+                        }
+                      >
+                        <ScreenIcon />
+                        <span>Экран</span>
+                        {participantAction === screenActionKey && (
+                          <i className={styles.actionSpinner} />
+                        )}
+                      </button>
+
+                      <button
+                        type="button"
+                        className={styles.removeParticipantButton}
+                        onClick={() =>
+                          void runParticipantAction(participant, "remove")
+                        }
+                        disabled={!participant.userId || actionInProgress}
+                        title="Исключить участника"
+                      >
+                        <span aria-hidden="true">×</span>
+                        <span>Исключить</span>
+                        {participantAction === removeActionKey && (
+                          <i className={styles.actionSpinner} />
+                        )}
+                      </button>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </aside>
 
